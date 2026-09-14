@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # the oldest and newest interpreters the package claims to support
+        python-version: ["3.9", "3.13"]
+    steps:
+      # first-party GitHub actions, pinned to a major version tag
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        # base install plus dev only: the tests are deliberately free of torch
+        # and the Roboflow SDK, so CI stays fast and the base install stays honest
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Test
+        run: python -m pytest tests/ -q
+      - name: CLI smoke test
+        run: |
+          cvkit --version
+          for c in download frames mine sheets collect verify record \
+                   review-video fix-export train upload-images mark-null \
+                   tag upload-weights; do
+            cvkit "$c" --help > /dev/null || exit 1
+          done
+
+  sbom:
+    # Produces a current CycloneDX SBOM for Dependency-Track.
+    #
+    # Deliberately NOT a drift check against the committed bom.json: that file
+    # is a resolved snapshot, so any upstream release would fail an unrelated
+    # PR. The committed copy is refreshed on purpose with ./scripts/make_bom.sh;
+    # this job guarantees a current one always exists as a build artifact.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the SBOM tooling
+        run: python -m pip install --upgrade pip cyclonedx-bom
+      - name: Generate SBOM
+        run: ./scripts/make_bom.sh
+      - name: Validate against the CycloneDX 1.6 schema
+        run: |
+          pip install "cyclonedx-python-lib[validation]"
+          python - <<'EOF'
+          from cyclonedx.validation.json import JsonStrictValidator
+          from cyclonedx.schema import SchemaVersion
+          err = JsonStrictValidator(SchemaVersion.V1_6).validate_str(open("bom.json").read())
+          raise SystemExit(f"invalid SBOM: {err!r}") if err else print("SBOM valid")
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cyclonedx-sbom
+          path: bom.json
+          if-no-files-found: error

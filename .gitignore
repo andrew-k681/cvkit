@@ -1,0 +1,21 @@
+# secrets -- only .env.example is ever committed
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# model weights and training output
+*.pt
+*.onnx
+runs/
+
+# working data: videos, frames, exports, contact sheets, caches
+data/
