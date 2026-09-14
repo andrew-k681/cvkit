@@ -35,7 +35,7 @@ jobs:
         run: |
           cvkit --version
           for c in download frames mine sheets collect verify record \
-                   review-video fix-export train upload-images mark-null \
+                   review-video bench fix-export train upload-images mark-null \
                    tag upload-weights; do
             out=$(cvkit "$c" --help 2>&1) && continue
             case "$out" in

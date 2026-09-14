@@ -471,3 +471,19 @@ def test_short_detection_rows_are_refused_at_load(tmp_path):
     names, frames = load_detections(p)
     assert names == {0: "object"}                      # default when unnamed
     assert frames[0][0][6] is None and frames[0][0][7] == []
+
+
+@needs_images
+def test_peak_rss_unit_differs_by_platform(monkeypatch):
+    """ru_maxrss is bytes on macOS/BSD and kilobytes on Linux. Treating one as
+    the other reports 1.8 GB as 1.8 MB, which reads as entirely plausible."""
+    import resource
+
+    from cvkit import bench
+
+    monkeypatch.setattr(resource, "getrusage",
+                        lambda _who: types.SimpleNamespace(ru_maxrss=2 * 1024 * 1024))
+    monkeypatch.setattr(bench.sys, "platform", "darwin")
+    assert bench.peak_rss_mb() == 2                 # bytes -> 2 MB
+    monkeypatch.setattr(bench.sys, "platform", "linux")
+    assert bench.peak_rss_mb() == 2048              # kilobytes -> 2 GB

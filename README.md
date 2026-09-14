@@ -203,6 +203,21 @@ project avoiding AGPL cannot import Ultralytics even to look at its own
 results. With `--detections`, `review-video` runs in an install that has
 neither Ultralytics nor torch.
 
+### 4b. Know what it costs
+
+```bash
+cvkit bench data/raw/clip.mp4 --model yolo26s-pose.pt --imgsz 1280
+```
+
+Published numbers are COCO at 640 on a datacentre GPU; what decides whether a
+model fits an edge box is your frames, at your imgsz, on your hardware. Run it
+once per model and compare rows — one process per model on purpose, since a
+second model in the same process makes the memory figure meaningless.
+
+Latency is a median and p90, never a mean: the tail is what breaks frame rate.
+The warmup frames are discarded because the first inferences pay for lazy init
+and kernel compilation.
+
 ### 5. Keep the dataset honest
 
 ```bash
