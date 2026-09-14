@@ -11,9 +11,9 @@ Two traps this exists to close:
    to absolute before the chdir; a bare name is left alone so the download
    still happens.
 
-It is also the one place a checkpoint is unpickled, so it is where restricted
-loading gets turned on -- and, just as importantly, where cvkit checks that it
-actually took. See safe_load_gap().
+3. A .pt is a pickle, and Ultralytics unpickles it unrestricted unless
+   ULTRALYTICS_SAFE_LOAD is set -- which old versions ignore. load() sets it
+   and safe_load_gap() checks it took.
 
 Importing torch/ultralytics is deferred to call time: the frame, sheet and
 export tools must stay usable in an install that has neither.
@@ -36,26 +36,17 @@ def pick_device(preferred=None):
     return "cpu"
 
 
-# The versions that actually implement restricted loading. The flag landed in
-# ultralytics 8.4.67 (8.4.66 does not have it), and the torch probe behind it
-# moved from `safe_globals` to `get_unsafe_globals_in_checkpoint` by 8.4.150,
-# which is torch 2.6.
+# Restricted loading: the flag landed in ultralytics 8.4.67, its torch probe needs 2.6.
 SAFE_LOAD_MIN = "'ultralytics>=8.4.67' 'torch>=2.6'"
 
 
 def safe_load_gap():
     """Why restricted checkpoint loading is *not* in force, or None if it is.
 
-    Setting ULTRALYTICS_SAFE_LOAD is not enough to rely on, because both halves
-    of the feature fail quietly. The flag does not exist before ultralytics
-    8.4.67, where it is simply ignored. And `torch_safe_load` does
-    `if safe_only and not _SafeLoad.SUPPORTED: safe_only = False` -- a silent
-    fallback to an unrestricted load -- where SUPPORTED is a hasattr probe
-    against torch.serialization.
-
-    A floor in pyproject.toml does not settle it either: an existing venv holds
-    whatever it holds. So ask the installed code, and let load() refuse rather
-    than let a docstring promise something that is not happening.
+    Setting the flag is not evidence it took: an old ultralytics ignores it,
+    and torch_safe_load drops back to an unrestricted load -- silently -- when
+    its torch probe fails. A pyproject floor cannot settle it either, since an
+    existing venv holds whatever it holds, so ask the installed code.
     """
     try:
         from ultralytics.utils import SAFE_LOAD
@@ -63,9 +54,8 @@ def safe_load_gap():
         return "this ultralytics is older than 8.4.67 and ignores the flag"
     if not SAFE_LOAD:
         return "ultralytics read ULTRALYTICS_SAFE_LOAD as off"
-    # _SafeLoad is private, so a rename upstream must not become a false alarm
-    # that blocks a perfectly good install: only report a gap on positive
-    # evidence that the torch probe failed.
+    # _SafeLoad is private: report a gap only on positive evidence, so a
+    # rename upstream cannot block a working install.
     try:
         from ultralytics.nn.tasks import _SafeLoad
     except ImportError:
@@ -84,16 +74,10 @@ def load(model_name, weights_dir, device=None):
     wdir = Path(weights_dir)
     wdir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(wdir))
-    # A .pt checkpoint is a pickle, and Ultralytics loads one through
-    # torch.load with weights_only=False unless this is set -- so `--model
-    # something-someone-sent-you.pt` is arbitrary code execution at load time.
-    # Restricted loading rebuilds only the model classes on its allow-list,
-    # which covers every checkpoint this toolkit trains or downloads.
-    #
-    # It has to be set before ultralytics is imported: the flag is read once,
-    # into a module constant. That is why the require() below sits after it.
-    opted_out = os.environ.get("ULTRALYTICS_SAFE_LOAD", "1").strip().lower() in (
-        "", "0", "f", "false", "n", "no", "off")
+    # Must precede the ultralytics import below: the flag is read once, into a
+    # module constant. ULTRALYTICS_SAFE_LOAD=0 opts out of the check.
+    flag = os.environ.get("ULTRALYTICS_SAFE_LOAD", "1").strip().lower()
+    opted_out = flag not in ("1", "true", "yes", "on", "y", "t")   # env_bool's set
     os.environ.setdefault("ULTRALYTICS_SAFE_LOAD", "1")
 
     cwd = Path.cwd()

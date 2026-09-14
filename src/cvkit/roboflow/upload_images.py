@@ -81,8 +81,7 @@ def run(args):
             ok += 1
         except Exception as e:                      # keep going; report at the end
             fail += 1
-            # scrub: the SDK puts the key in its URLs, so a connection error
-            # stringifies with the key in it -- once per failed image.
+            # scrub: the SDK puts the key in its URLs, once per failed image.
             print(f"  FAILED {p.name}: {type(e).__name__} "
                   f"{config.scrub(str(e), key)[:90]}")
         if i % 10 == 0 or i == len(jobs):

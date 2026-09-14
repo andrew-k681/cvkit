@@ -112,32 +112,27 @@ and Ultralytics loads one with `weights_only=False` unless told otherwise —
 is read once into a module constant, so it must be set *before* ultralytics is
 imported; that is why the `config.require` call sits below it, not above.
 
-**Setting the flag is not evidence it took**, which is why `safe_load_gap()`
-exists and `load()` refuses when it reports one. Both halves of the feature
-fail *quietly*: the flag does not exist before ultralytics 8.4.67 (8.4.66 does
-not have it — this was bisected, not guessed), and `torch_safe_load` does
-`if safe_only and not _SafeLoad.SUPPORTED: safe_only = False`, where SUPPORTED
-is a `hasattr` probe against `torch.serialization` that needs torch 2.6. Hence
-the floors in `pyproject.toml`; do not lower them without deleting the claim
-this file makes. `ULTRALYTICS_SAFE_LOAD=0` is the escape hatch and skips the
-check. `_SafeLoad` is private, so its *absence* is deliberately not treated as
-a gap — an upstream rename must not block a working install.
+**Setting the flag is not evidence it took**, hence `safe_load_gap()` and the
+refusal in `load()`. Both halves fail *quietly*: the flag does not exist before
+ultralytics 8.4.67 (bisected, not guessed) and its torch probe needs 2.6 —
+which is where the `pyproject.toml` floors come from, so do not lower them
+without deleting the claim made here. `ULTRALYTICS_SAFE_LOAD=0` skips the
+check. `_SafeLoad` is private, so its absence is deliberately *not* a gap: an
+upstream rename must not block a working install.
 
 **6. Treat file contents as untrusted input.** Manifest CSVs, label files,
-`urls.txt` and a `data.yaml` are parsed, not trusted. These are the files that
+`urls.txt` and a `data.yaml` are parsed, not trusted — they are the files that
 get committed, shared and pasted into.
 
 - `collect` takes `Path(row["frame"]).name` before joining it to a destination,
   so a crafted row cannot write outside the output directory.
 - `download.read_urls` refuses a line starting with `-`, and `build_command`
-  puts `--` in front of the URLs. Either alone would do; both are there because
-  yt-dlp has options that run commands (`--exec`), so one line of a shared
-  urls file would otherwise be arbitrary code execution.
-- `train.check_data_yaml` refuses a `download:` key. Ultralytics *runs* that
-  field — `bash ...` through subprocess, anything else through `exec()` —
-  whenever the `val:` images are missing, and a hostile file sets both keys.
-  It is parsed with `yaml.safe_load`, not pattern-matched: a regex misses
-  `{download: ...}` flow style, and a bypassable check is worse than none.
+  puts `--` in front of the URLs. Either alone would do; yt-dlp has options
+  that run commands (`--exec`).
+- `train.check_data_yaml` refuses a `download:` key, which Ultralytics runs via
+  subprocess or `exec()` when the `val:` images are missing. Parsed with
+  `yaml.safe_load`, not pattern-matched: a regex misses `{download: ...}` flow
+  style, and a bypassable check is worse than none.
 
 **7. A secret must never reach an error message.** The Roboflow key travels in
 the query string — in this toolkit's own calls *and* in the SDK's, which builds
@@ -153,13 +148,12 @@ blanks it, and every path that prints or raises such a message uses it:
   which was otherwise an unwrapped traceback.
 
 Three details are load-bearing. The `raise` in `_call` sits *outside* the
-`except` block: raised inside it, the original exception stays on `__context__`
-even with `from None`, and anything that walks the chain itself prints the key
-anyway. `ApiError` derives from `Exception`, not `SystemExit`, so the per-item
-`except Exception` in the tagging loops still catches it and the batch keeps
-going. And the message leads with the *reason* and trails the URL, because
-those handlers print `str(e)[:90]` and one Roboflow image URL fills that on its
-own — lead with the address and every failure line reads `...failed: H`.
+`except` block, because inside it the original stays on `__context__` even with
+`from None` and anything walking the chain prints the key anyway. `ApiError` is
+an `Exception`, not a `SystemExit`, so the per-item handlers in the tagging
+loops still catch it and the batch keeps going. And the message leads with the
+reason, because those handlers print `str(e)[:90]` and one Roboflow image URL
+fills that on its own.
 
 ## Frame naming — read before touching `naming.py`
 
@@ -192,16 +186,14 @@ conventions 5, 6 and 7 — the urls-file parser and the `--` separator, the
 `data.yaml` `download:` refusal, the key scrubbing, and `safe_load_gap` — with
 stubs standing in for `requests` and `ultralytics`.
 
-They require **no** torch, network or GUI. They are not, however, free of
-*every* extra: seven reach into `dataset/fix_export.py` and `mining/sheets.py`
-for a pure function, and those modules carry a module-level numpy/cv2 import by
-convention 1, so importing the function pulls those in. Five more need PyYAML.
-All twelve `skipif` rather than fail, so a base install still runs the rest —
-this used to be an eager import that broke collection for everyone, and it went
-unnoticed because CI had never actually run. Do not "tidy" those imports back
-to the top of the file. Two of the PyYAML five assert only `raises(SystemExit)`,
-which a missing import would satisfy: without the skip they would pass for the
-wrong reason.
+They require **no** torch, network or GUI, but they are not free of *every*
+extra: seven import a pure function out of `fix_export.py` or `mining/sheets.py`,
+which carry a module-level numpy/cv2 import by convention 1, and five need
+PyYAML. All twelve `skipif` rather than fail — as an eager import this broke
+collection for everyone, unnoticed because CI had never run. Do not tidy those
+imports back to the top. Two of the PyYAML five assert only
+`raises(SystemExit)`, which a missing import satisfies: without the skip they
+would pass for the wrong reason.
 
 Not covered by tests, and needing manual verification when touched:
 
@@ -216,12 +208,10 @@ commands *first*, so that check sees a genuine base install, then adds
 `[images]` and runs pytest, so nothing skips in CI. Still no torch and no
 Roboflow SDK.
 
-The smoke test does not require `--help` to succeed. On a base install the six
-commands gated on an extra cannot import their module at all, so they exit 1 by
-design, naming the extra — that is `cli.py`'s ImportError handler doing its job.
-It passes a command that prints help *or* names an extra, and fails anything
-else, which is what actually checks that every `COMMANDS` entry carries its
-fifth field. A plain `|| exit 1` cannot work here, and was the bug.
+The smoke test does not require `--help` to succeed: on a base install the six
+gated commands cannot import their module, so they exit 1 by design, naming the
+extra. It passes help *or* a named extra and fails anything else, which is what
+checks the fifth `COMMANDS` field. A plain `|| exit 1` cannot work here.
 
 ## Known platform behaviour worth not rediscovering
 

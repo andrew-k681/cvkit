@@ -29,11 +29,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: CLI smoke test
-        # On a base install the commands gated on an extra cannot import their
-        # module at all, so `--help` exits 1 *by design*, naming the extra
-        # (cli.py's ImportError handler). Either outcome is a pass; a traceback
-        # or a message that names no extra is not. That is what checks every
-        # COMMANDS entry carries its fifth field -- convention 1 in AGENTS.md.
+        # A gated command cannot import its module on a base install, so
+        # `--help` exits 1 by design, naming the extra. Passing either outcome
+        # -- but nothing else -- is what checks the fifth COMMANDS field.
         run: |
           cvkit --version
           for c in download frames mine sheets collect verify record \
@@ -46,9 +44,8 @@ jobs:
             esac
           done
       - name: Add the images extra
-        # A handful of tests reach into fix_export and mining.sheets, which
-        # carry a module-level numpy/cv2 import by convention. They skip on a
-        # base install; install the extra so CI actually runs them. Still no
+        # Some tests reach into fix_export and mining.sheets, which import
+        # numpy/cv2 at module scope; without this they would skip. Still no
         # torch and no Roboflow SDK -- those stay stubbed.
         run: pip install -e ".[dev,images]"
       - name: Test
@@ -80,9 +77,7 @@ jobs:
           from cyclonedx.schema import SchemaVersion
           err = JsonStrictValidator(SchemaVersion.V1_6).validate_str(open("bom.json").read())
           # Not `raise ... if err else print(...)`: that parses as
-          # `raise (X if err else print(...))`, so a VALID bom prints, gets
-          # None back, and raises None -> "exceptions must derive from
-          # BaseException". It could never pass.
+          # `raise (X if err else print(...))`, so a VALID bom raises None.
           if err:
               raise SystemExit(f"invalid SBOM: {err!r}")
           print("SBOM valid")

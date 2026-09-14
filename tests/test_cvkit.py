@@ -4,11 +4,9 @@ Deliberately free of torch, the Roboflow SDK and the network, so they run in a
 base install. The detector-driven paths are exercised by hand; what is tested
 here is the arithmetic that silently corrupts a dataset when it is wrong.
 
-Seven of them reach into `dataset.fix_export` and `mining.sheets`, which carry
-a module-level numpy/cv2 import by convention (AGENTS.md, convention 1), so
-importing the pure function still pulls those in. They skip on a base install
-rather than failing collection for everyone; CI installs the images extra, so
-nothing skips there.
+Twelve need an extra anyway -- `fix_export` and `mining.sheets` carry a
+module-level numpy/cv2 import by convention, and PyYAML backs the data.yaml
+guard. Those skip rather than fail collection for everyone.
 """
 import json
 import sys
@@ -37,8 +35,8 @@ try:
 except ImportError:                     # PyYAML ships in the dev and detect extras
     _yaml = None
 
-# Without it check_data_yaml exits on the missing import instead of on what it
-# is being tested for -- which two of these would have counted as a pass.
+# Without it check_data_yaml exits on the missing import, not on what is being
+# tested -- which two of these assert loosely enough to accept.
 needs_yaml = pytest.mark.skipif(
     _yaml is None, reason="needs PyYAML: pip install -e '.[dev]'")
 
@@ -184,9 +182,9 @@ def test_read_env_var_missing_file(tmp_path):
 
 # ------------------------------------------------- urls file -> yt-dlp argv
 #
-# A urls file is shared, committed and pasted into, and yt-dlp has options that
-# run commands (--exec). Both halves of the defence are tested: the parser
-# refuses an option-shaped line, and the argv puts `--` in front of the URLs.
+# yt-dlp has options that run commands (--exec). Both halves of the defence are
+# tested: the parser refuses an option-shaped line, and the argv puts `--`
+# in front of the URLs.
 
 def test_read_urls_skips_blanks_and_comments(tmp_path):
     f = tmp_path / "urls.txt"
@@ -223,9 +221,8 @@ def test_build_command_keeps_cookies_before_the_separator(tmp_path):
 
 # ------------------------------------------------------------- data.yaml
 #
-# Ultralytics executes a data.yaml's `download:` field -- bash via subprocess,
-# anything else via exec() -- whenever the val images are missing. An export is
-# a file you got from somewhere, so cvkit refuses the key before training.
+# Ultralytics executes a `download:` field whenever the val images are missing,
+# so cvkit refuses the key before training.
 
 @needs_yaml
 def test_data_yaml_with_a_download_key_is_refused(tmp_path):
@@ -264,8 +261,8 @@ def test_unreadable_yaml_is_a_clean_exit_not_a_traceback(tmp_path):
 
 # --------------------------------------------------- api key in error text
 #
-# The key rides in the query string, so requests names it in the message of
-# every error it raises. Uncaught, that reaches a traceback and a CI log.
+# The key rides in the query string, so requests names it in every error it
+# raises, and an uncaught one reaches a traceback and a CI log.
 
 KEY = "rf_SUPERSECRET123"
 
@@ -293,9 +290,8 @@ def test_api_errors_do_not_carry_the_key():
 
 
 def test_api_error_does_not_chain_the_original_unscrubbed_exception():
-    """A chained original is a leak: `from None` only sets a flag the default
-    printer honours, and anything that walks __context__ itself still finds the
-    key. _call therefore raises outside the handler, leaving nothing attached."""
+    """`from None` only sets a flag; anything walking __context__ still finds
+    the key. _call raises outside the handler, so nothing is attached."""
     with pytest.raises(search.ApiError) as e:
         search.page(_Boom(), KEY, "ws", "pr", {}, 0)
     assert e.value.__cause__ is None and e.value.__context__ is None
@@ -308,9 +304,7 @@ def test_api_error_is_catchable_by_the_per_item_loops():
 
 
 def test_api_error_reason_survives_the_per_item_truncation():
-    """The tag/upload loops print str(e)[:90]. A Roboflow image URL alone eats
-    that budget, so the reason has to come first or every failure reads
-    "...failed: H"."""
+    """The loops print str(e)[:90], and one image URL fills that on its own."""
     long_url = f"{search.API}/my-workspace/my-project/images/68f3abc123def4567890abcd/tags"
 
     class _Boom:
@@ -339,9 +333,8 @@ def test_scrub_blanks_the_key_anywhere_in_the_text():
 
 # ------------------------------------------------- restricted model loading
 #
-# Setting ULTRALYTICS_SAFE_LOAD is not evidence it took: the flag does not
-# exist before ultralytics 8.4.67, and the torch probe behind it fails silently
-# back to an unrestricted load. safe_load_gap asks the installed code instead.
+# Setting ULTRALYTICS_SAFE_LOAD is not evidence it took -- an old ultralytics
+# ignores it, an old torch silently defeats it -- so safe_load_gap asks.
 
 def _fake_ultralytics(monkeypatch, *, flag=True, on=True, tasks=True, supported=True):
     pkg = types.ModuleType("ultralytics")
@@ -382,8 +375,7 @@ def test_gap_when_torch_is_too_old(monkeypatch):
 
 
 def test_a_renamed_private_class_is_not_a_false_alarm(monkeypatch):
-    """_SafeLoad is private. If it moves, the public flag is still on -- do not
-    block a working install on the absence of an internal name."""
+    """If it moves the public flag is still on; do not block a working install."""
     _fake_ultralytics(monkeypatch, tasks=False)
     assert detector.safe_load_gap() is None
 
@@ -399,8 +391,7 @@ def test_require_names_the_distribution_not_the_module():
 
 @needs_yaml
 def test_a_directory_is_not_reported_as_corrupt_yaml(tmp_path):
-    """Ultralytics accepts a directory here; cvkit does not, and should say
-    which rather than imply the file is broken."""
+    """Ultralytics accepts one here; cvkit does not, and should say which."""
     d = tmp_path / "my-export"
     d.mkdir()
     with pytest.raises(SystemExit) as e:

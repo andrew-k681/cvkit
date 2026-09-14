@@ -7,8 +7,8 @@ observed pass over 800 images came back with 735 rows holding 657 unique ids.
 So we sweep repeatedly and keep a set, stopping once two consecutive sweeps
 add nothing. It is not a guarantee -- it is the best this endpoint supports.
 
-Every request goes through _call, which is what keeps the API key out of error
-messages -- see its docstring before adding a call that bypasses it.
+Every request goes through _call, which keeps the API key out of error
+messages. Do not add one that bypasses it.
 """
 from .. import config
 
@@ -20,32 +20,22 @@ class ApiError(Exception):
 
 
 def _call(requests, key, method, url, **kw):
-    """Make one request, and let nothing out of `requests` escape raw.
+    """Make one request, letting nothing out of `requests` escape raw.
 
-    The key travels as a query parameter, because that is what this endpoint
-    takes -- so requests puts the whole URL, key included, in the message of
-    every error it raises. Uncaught, that message reaches a traceback, a CI
-    log, and whatever gets pasted into a bug report.
-
-    The raise sits *outside* the except block, and that placement is the point:
-    raised inside it, the original exception stays attached as __context__ even
-    with `from None` -- which only sets a flag the default traceback printer
-    happens to honour. Anything that walks the chain itself (a logger, a crash
-    reporter, pytest's assertion output) prints the key after all. Outside the
-    handler there is no context to attach.
-
-    ApiError derives from Exception rather than SystemExit deliberately, so the
-    per-item `except Exception` in the tagging loops still catches it and the
-    batch keeps going instead of aborting on one bad row.
+    The key rides in the query string, so requests names it in every error it
+    raises. Two things are deliberate: the raise sits *outside* the except
+    block, because inside it the original stays on __context__ even with
+    `from None` and anything walking the chain prints the key anyway; and
+    ApiError is an Exception, not SystemExit, so the per-item handlers in the
+    tagging loops still catch it and the batch keeps going.
     """
     try:
         r = getattr(requests, method)(url, params={"api_key": key}, **kw)
         r.raise_for_status()
         return r
     except Exception as e:
-        # Reason first, URL last: the per-item handlers print str(e)[:90], and
-        # a Roboflow image URL alone eats that whole budget -- lead with the
-        # address and every failure line reads "...failed: H".
+        # Reason first, URL last: the handlers print str(e)[:90], and one
+        # Roboflow image URL fills that on its own.
         msg = (f"{type(e).__name__}: {config.scrub(str(e), key)} "
                f"[{method.upper()} {config.scrub(url, key)}]")
     raise ApiError(msg)

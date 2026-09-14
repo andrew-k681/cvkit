@@ -33,8 +33,7 @@ def run(args):
 
     key = config.api_key(args)
     project = config.rf_project(args)
-    # Unwrapped, an SDK failure here is a traceback carrying the key: the SDK
-    # builds its URLs as `...?api_key=<key>`.
+    # Unwrapped, an SDK failure here is a traceback carrying the key.
     try:
         version = project.version(args.version)
         version.deploy(
@@ -47,6 +46,5 @@ def run(args):
     else:
         print("upload call returned; server-side conversion takes a few minutes")
         return 0
-    # Raised outside the handler, so the original exception -- key and all --
-    # is not left on __context__; same reason as roboflow/search.py::_call.
+    # Outside the handler, so the original is not left on __context__.
     raise SystemExit(f"upload failed: {msg}")

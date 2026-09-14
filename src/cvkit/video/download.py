@@ -8,9 +8,8 @@ re-running only fetches what is new.
     cvkit download --urls urls.txt --out data/raw
     cvkit download --cookies firefox        # if the site asks you to sign in
 
-The urls file is *input*, not configuration -- it is the file that gets
-committed, shared and pasted into. read_urls and build_command are what keep a
-line of it from becoming a yt-dlp option; read both before changing either.
+The urls file is *input*, not configuration. read_urls and build_command are
+what stop a line of it becoming a yt-dlp option.
 """
 import subprocess
 import sys
@@ -25,13 +24,9 @@ DEFAULT_FORMAT = "bv*[ext=mp4][height<=1080]/b[ext=mp4]"
 def read_urls(path):
     """URLs from a urls file: one per line, blank lines and # comments skipped.
 
-    A line starting with `-` is refused, not passed along. yt-dlp would read it
-    as an option, and it has options that run commands -- a line reading
-    `--exec=...` is arbitrary code execution the moment someone runs `cvkit
-    download`, and with --cookies it can also aim the browser's cookies at an
-    address of the file's choosing. build_command puts a `--` separator in
-    front of the URLs as well; this is the half that still holds if that
-    separator is ever dropped.
+    A line starting with `-` is refused: yt-dlp would read it as an option, and
+    `--exec=...` runs commands. build_command also puts `--` in front of the
+    URLs -- this is the half that holds if that separator is ever dropped.
     """
     urls = []
     for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):

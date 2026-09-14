@@ -17,8 +17,7 @@ fine for research, a real obligation if you ship the result.
     cvkit train --data data/my-export/data.yaml
     cvkit train --data data/my-export/data.yaml --model yolo11n.pt --epochs 50 --imgsz 960
 
-A data.yaml is a file you got from somewhere -- an export, a collaborator -- so
-it is input, not configuration. check_data_yaml is what stops it running.
+A data.yaml is input, not configuration: check_data_yaml stops it running.
 """
 from pathlib import Path
 
@@ -28,19 +27,15 @@ from . import config, detector, paths
 def check_data_yaml(path):
     """Refuse a data.yaml that carries a `download:` key.
 
-    Ultralytics *runs* that field: `bash ...` goes to subprocess, anything else
-    goes to exec() (check_det_dataset, ultralytics/data/utils.py). It fires
-    whenever the `val:` images are missing -- and a file written to attack you
-    sets both keys, so neither condition is a barrier.
-
-    Ultralytics' own stock dataset yamls (coco8.yaml and friends) use the key
-    legitimately to fetch themselves. cvkit trains on an export you already
-    have on disk, so refusing it here costs nothing that this toolkit does.
+    Ultralytics *runs* that field -- `bash ...` through subprocess, anything
+    else through exec() (check_det_dataset) -- whenever the `val:` images are
+    missing, and a hostile file sets both keys. Only its own stock yamls
+    (coco8 and friends) use it legitimately, and cvkit trains on an export you
+    already have.
     """
     yaml = config.require("yaml", "detect", "PyYAML")
-    # Ultralytics also accepts a directory or a zip here and finds the yaml
-    # inside; this refuses both rather than guess, so say which, or the message
-    # reads as though the file were corrupt.
+    # Ultralytics also takes a directory or a zip here; we refuse both, so say
+    # which, or the message reads as though the file were corrupt.
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):

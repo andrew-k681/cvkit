@@ -64,8 +64,7 @@ def run(args):
                 ok += 1
             except Exception as e:
                 fail += 1
-                # scrub: the SDK builds `...?api_key=<key>` URLs, and a
-                # connection error names the URL it was trying.
+                # scrub: the SDK builds `...?api_key=<key>` URLs.
                 print(f"  FAILED {img['name']}: {type(e).__name__} "
                       f"{config.scrub(str(e), key)[:90]}")
             if i % 10 == 0 or i == len(found):
