@@ -241,9 +241,17 @@ checks the fifth `COMMANDS` field. A plain `|| exit 1` cannot work here.
 **Minimalism is the default, and it is not negotiable.** The smallest change
 that does the job, the fewest lines that say it, each fact stated once in one
 place. Before writing a paragraph, check whether the code, a docstring or this
-file already carries it. Prefer deleting to explaining. This applies equally to
-code, comments, docs, tests and commit messages — the prose here has been cut
-back once already for restating itself.
+file already carries it. Prefer deleting to explaining.
+
+**Every line added must be shown to be required, not argued to be useful.** Be
+able to name what breaks without it, and demonstrate that — a failing test, a
+reproduced trap, a command that misbehaves. No speculative generality, no flag
+without a caller, no defensive branch for a state that cannot arise, no helper
+with one inlineable use. If it cannot be demonstrated, it does not go in; if it
+was demonstrated, the demonstration belongs in `tests/`.
+
+Both rules apply equally to code, comments, docs, tests and commit messages —
+the prose here has been cut back once already for restating itself.
 
 Match what is there otherwise. Specifically:
 

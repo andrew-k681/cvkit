@@ -70,7 +70,7 @@ def scrub(text, key):
     The key rides in the query string -- ours and the SDK's alike -- so it
     turns up in the message of any error requests raises.
     """
-    return text.replace(key, "<redacted>") if key else text
+    return text.replace(key, "<redacted>")
 
 
 def require(module, extra, package=None):

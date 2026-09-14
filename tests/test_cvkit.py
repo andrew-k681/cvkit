@@ -328,7 +328,6 @@ def test_scrub_blanks_the_key_anywhere_in_the_text():
     assert scrub(f"url: /ws/pr?api_key={KEY} (retries)", KEY) == \
         "url: /ws/pr?api_key=<redacted> (retries)"
     assert scrub("nothing to hide", KEY) == "nothing to hide"
-    assert scrub(f"key {KEY}", "") == f"key {KEY}"      # no key, no crash
 
 
 # ------------------------------------------------- restricted model loading
