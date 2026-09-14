@@ -464,13 +464,50 @@ def test_short_detection_rows_are_refused_at_load(tmp_path):
     p.write_text('{"names": {"0": "person"}, "frames": '
                  '[[[1, 2, 3, 4, 0.9, 0, 7, [[5, 6, 0.8]]]], [[1, 2, 3, 4, 0.9, 0]]]}')
     with pytest.raises(SystemExit) as e:
-        load_detections(p)
+        load_detections(p, 100, 100)
     assert "frame 1" in str(e.value) and "6 fields" in str(e.value)
 
     p.write_text('{"frames": [[[1, 2, 3, 4, 0.9, 0, null, []]]]}')
-    names, frames = load_detections(p)
+    names, frames = load_detections(p, 100, 100)
     assert names == {0: "object"}                      # default when unnamed
     assert frames[0][0][6] is None and frames[0][0][7] == []
+
+
+@needs_images
+def test_detections_accept_a_bare_prescan_cache(tmp_path):
+    """prescan writes a bare list; the docs promise the two are interchangeable."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "cache.json"
+    p.write_text('[[[1, 2, 3, 4, 0.9, 0, 7, [[5, 6, 0.8]]]], []]')
+    names, frames = load_detections(p, 100, 100)
+    assert names == {0: "object"} and len(frames) == 2 and frames[1] == []
+
+
+@needs_images
+def test_detection_coordinates_are_clamped_into_the_frame(tmp_path):
+    """OpenCV takes C ints: an out-of-range value raises OverflowError from
+    inside the render loop rather than drawing off-screen."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    p.write_text('{"frames": [[[-9, -9, 10000000000000000000, 5, 0.9, 0, null, '
+                 '[[-4, 99999999999999999999, 0.8]]]]]}')
+    _names, frames = load_detections(p, 640, 480)
+    x1, y1, x2, y2 = frames[0][0][:4]
+    assert (x1, y1, x2, y2) == (0, 0, 640, 5)
+    assert frames[0][0][7][0][:2] == [0, 480]
+
+
+@needs_images
+def test_a_detections_file_that_is_not_frames_is_refused(tmp_path):
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    p.write_text('{"names": {"0": "person"}}')
+    with pytest.raises(SystemExit) as e:
+        load_detections(p, 100, 100)
+    assert "frames" in str(e.value)
 
 
 @needs_images

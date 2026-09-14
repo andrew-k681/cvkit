@@ -194,8 +194,10 @@ cvkit review-video clip.mp4 --detections mediapipe.json --events events.json
 ```
 
 One entry per frame, in order; `track_id` may be null and the keypoint list may
-be empty. It is the shape the tracking pass caches, so the two are
-interchangeable.
+be empty. The bare list the tracking pass caches is accepted too, so a cached
+pass can be handed to someone else as-is. Coordinates are clamped into the
+frame and a frame-count mismatch is warned about — overlaying one decode's
+boxes on another's frames is the failure this invites.
 
 This exists for licensing. The `detect` extra is Ultralytics and therefore
 **AGPL-3.0**; MediaPipe, RTMPose, ViTPose and RF-DETR are Apache-2.0, and a

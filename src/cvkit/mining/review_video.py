@@ -101,15 +101,30 @@ def load_events(path, total):
     return sorted(out)
 
 
-def load_detections(path):
+def load_detections(path, width, height):
     """(names, per_frame) from a pass another tool made. See the module docstring.
 
-    Parsed, not trusted: the per-frame rows are indexed positionally
-    everywhere downstream, so a row that is too short would fail later and
-    somewhere unhelpful.
+    Takes either {"names": ..., "frames": [...]} or the bare list prescan
+    caches, so a cached pass can be handed to someone else as-is.
+
+    Parsed, not trusted: this is a file another program wrote, and every row is
+    indexed positionally downstream. A short row is refused here, naming the
+    frame, rather than raising an opaque unpack error three call sites later.
+    Coordinates are clamped into the frame for the same reason: OpenCV takes
+    C ints, so an out-of-range Python int does not draw off-screen, it raises
+    OverflowError from inside the render loop.
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    names = {int(k): str(v) for k, v in data.get("names", {}).items()} or {0: "object"}
+    if isinstance(data, list):                      # a prescan cache
+        data = {"frames": data}
+    if not isinstance(data, dict) or not isinstance(data.get("frames"), list):
+        raise SystemExit(f"{path}: expected a list of frames, or an object with "
+                         f'a "frames" list')
+    names = {int(k): str(v) for k, v in (data.get("names") or {}).items()} or {0: "object"}
+
+    def clamp(v, hi):
+        return max(0, min(int(v), hi))
+
     frames = []
     for n, fr in enumerate(data["frames"]):
         row = []
@@ -119,8 +134,11 @@ def load_detections(path):
                     f"{path}: frame {n} has a detection with {len(b)} fields, "
                     f"expected 8 (x1 y1 x2 y2 conf cls track_id keypoints)")
             x1, y1, x2, y2, conf, cls, tid, pts = b
-            row.append((int(x1), int(y1), int(x2), int(y2), float(conf), int(cls),
-                        tid, [[int(x), int(y), float(v)] for x, y, v in pts or []]))
+            row.append((clamp(x1, width), clamp(y1, height),
+                        clamp(x2, width), clamp(y2, height),
+                        float(conf), int(cls), tid,
+                        [[clamp(x, width), clamp(y, height), float(v)]
+                         for x, y, v in pts or []]))
         frames.append(row)
     return names, frames
 
@@ -294,7 +312,9 @@ def run(args):
     if args.detections:
         # no model, so no torch and no Ultralytics in the process at all
         model = dev = None
-        names, loaded = load_detections(args.detections)
+        names, loaded = load_detections(
+            args.detections, int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     else:
         model, dev = detector.load(args.model,
                                    paths.resolve(args.weights_dir, ws.weights), args.device)
@@ -304,6 +324,12 @@ def run(args):
     print(f"{video.name}: {total} frames @ {fps:.1f} fps")
     print(f"detections {Path(args.detections).name} ({len(loaded)} frames), no model loaded"
           if loaded is not None else f"model {Path(args.model).name} on {dev}")
+    if loaded is not None and len(loaded) != total:
+        # Silently overlaying frame n's boxes on a different frame n is the
+        # whole failure mode --detections invites; a variable-frame-rate source
+        # decoded by another library is enough to cause it.
+        print(f"  WARNING: {len(loaded)} detection frames but the video has "
+              f"{total} -- these were made from a different decode")
     print(f"classes {names} -> filter: {label}")
 
     events = load_events(args.events, total) if args.events else []
