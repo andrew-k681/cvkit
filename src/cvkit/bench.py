@@ -1,20 +1,11 @@
 """Measure what a model costs on your own footage: latency, throughput, memory.
 
-Published benchmarks are COCO at 640 on a datacentre GPU. What decides whether
-a model fits an edge box is your frames, at your imgsz, on your hardware --
-and on a 2622x1206 CCTV frame at imgsz 1280 that is a different number
-entirely.
-
     cvkit bench data/raw/clip.mp4 --model yolo26s-pose.pt --imgsz 1280
     cvkit bench data/raw/clip.mp4 --model yolo26n.pt --frames 300 --device cpu
 
-Run it once per model and compare rows; one process per model on purpose,
-because a second model loaded into the same process makes the memory figure
-meaningless.
-
-Latency is reported as a median and p90, not a mean: the distribution has a
-long right tail (a slow decode, a GC pause) and a mean hides the p90 that
-actually decides whether you hold frame rate.
+One process per model: a second model in the same process makes the memory
+figure meaningless. Median and p90, not a mean -- the tail is what breaks
+frame rate.
 """
 import statistics as st
 import sys
@@ -27,15 +18,11 @@ from . import config, detector, paths
 
 
 def peak_rss_mb():
-    """Peak resident set size of this process in MB, or None where unavailable.
+    """Peak RSS in MB, or None off Unix.
 
-    ru_maxrss is in *bytes* on macOS and the BSDs and in *kilobytes* on Linux.
-    Getting this wrong reports 1.8 GB as 1.8 MB, which reads as plausible.
-
-    `resource` is Unix-only, and imported here rather than at module scope so
-    that on Windows the rest of the benchmark still runs -- a module-level
-    import would be caught by cli.py and reported as a missing extra, which is
-    advice that cannot help.
+    ru_maxrss is bytes on macOS/BSD and kilobytes on Linux; confusing them
+    reports 1.8 GB as 1.8 MB. Imported here, not at module scope, or cli.py
+    would catch the ImportError on Windows and blame a missing extra.
     """
     try:
         import resource
@@ -54,7 +41,7 @@ def device_memory_mb(torch, dev):
         if d.startswith("cuda") or d.isdigit():
             return torch.cuda.max_memory_allocated() / (1024 * 1024)
     except Exception:
-        return None                     # a probe must never fail the benchmark
+        return None                     # a probe must not fail the benchmark
     return None
 
 
@@ -104,9 +91,7 @@ def run(args):
         ok, frame = cap.read()
         t1 = time.perf_counter()
         if not ok:                       # short clip: loop rather than report fewer
-            # A file that decodes once and then always fails would spin here
-            # forever, printing nothing. Two rewinds without a frame is enough.
-            rewinds += 1
+            rewinds += 1                 # or a file that stops decoding spins here
             if rewinds > 2 and not decode:
                 raise SystemExit(f"{video} stopped decoding after {done} frames")
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)

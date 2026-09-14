@@ -402,9 +402,8 @@ def test_a_directory_is_not_reported_as_corrupt_yaml(tmp_path):
 
 @needs_images
 def test_draw_reads_a_prescan_tuple_and_hides_weak_keypoints():
-    """Pins the cached tuple's shape, which three call sites index positionally,
-    and the threshold: a pose model invents the keypoints it cannot see, so
-    drawing every one of them misreports what the model actually found."""
+    """Pins the cached tuple's shape and the threshold: a pose model invents
+    the keypoints it cannot see."""
     import numpy as np
 
     from cvkit.mining.review_video import draw
@@ -420,9 +419,8 @@ def test_draw_reads_a_prescan_tuple_and_hides_weak_keypoints():
 
 @needs_images
 def test_event_ranges_are_clamped_and_reversed_ones_refused(tmp_path):
-    """An events file is generated, hand-edited, committed and shared, so it is
-    parsed rather than trusted: a range outside the video would otherwise seek
-    past its end, and a reversed one silently matches no frame."""
+    """Parsed, not trusted: an out-of-range seek, a reversed range matches
+    nothing."""
     from cvkit.mining.review_video import load_events
 
     p = tmp_path / "events.json"
@@ -436,10 +434,8 @@ def test_event_ranges_are_clamped_and_reversed_ones_refused(tmp_path):
 
 
 def test_weights_dir_is_pinned_absolute(monkeypatch, tmp_path):
-    """Ultralytics ships weights_dir relative, so WEIGHTS_DIR resolves against
-    the cwd when it is finally used -- which for CLIP (world models) and the
-    AMP probe (training) is after load()'s chdir is restored. Observed: a
-    353 MB ViT-B-32.pt in a project root."""
+    """It ships relative, so it resolves against the cwd after load()'s chdir
+    is restored. Observed: a 353 MB ViT-B-32.pt in a project root."""
     import pathlib
 
     _fake_ultralytics(monkeypatch)
@@ -455,9 +451,7 @@ def test_weights_dir_is_pinned_absolute(monkeypatch, tmp_path):
 
 @needs_images
 def test_short_detection_rows_are_refused_at_load(tmp_path):
-    """Rows are indexed positionally by draw(), scan() and the track tally, so a
-    short one from a hand-rolled backend must fail here, naming the frame, not
-    three call sites later as an opaque unpack error."""
+    """Indexed positionally downstream, so a short row must fail here."""
     from cvkit.mining.review_video import load_detections
 
     p = tmp_path / "d.json"
@@ -475,7 +469,7 @@ def test_short_detection_rows_are_refused_at_load(tmp_path):
 
 @needs_images
 def test_detections_accept_a_bare_prescan_cache(tmp_path):
-    """prescan writes a bare list; the docs promise the two are interchangeable."""
+    """prescan writes a bare list; the docs promise it is accepted."""
     from cvkit.mining.review_video import load_detections
 
     p = tmp_path / "cache.json"
@@ -486,8 +480,7 @@ def test_detections_accept_a_bare_prescan_cache(tmp_path):
 
 @needs_images
 def test_detection_coordinates_are_clamped_into_the_frame(tmp_path):
-    """OpenCV takes C ints: an out-of-range value raises OverflowError from
-    inside the render loop rather than drawing off-screen."""
+    """OpenCV takes C ints: out of range raises OverflowError mid-render."""
     from cvkit.mining.review_video import load_detections
 
     p = tmp_path / "d.json"
@@ -512,8 +505,7 @@ def test_a_detections_file_that_is_not_frames_is_refused(tmp_path):
 
 @needs_images
 def test_peak_rss_unit_differs_by_platform(monkeypatch):
-    """ru_maxrss is bytes on macOS/BSD and kilobytes on Linux. Treating one as
-    the other reports 1.8 GB as 1.8 MB, which reads as entirely plausible."""
+    """bytes on macOS/BSD, kilobytes on Linux: 1.8 GB reads as 1.8 MB."""
     import resource
 
     from cvkit import bench

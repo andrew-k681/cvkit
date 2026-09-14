@@ -9,43 +9,25 @@ in a folder ready to upload.
     cvkit review-video data/raw/clip.mp4 \
         --model runs/v9/weights/best.pt --classes vehicle
 
-A pose checkpoint works the same way and additionally draws its keypoints:
+A pose checkpoint also draws its keypoints. Those below --kpt-conf are hidden:
+a pose model emits a whole skeleton whether or not it can see one, inventing
+the shoulders at 0.3 beside wrists that are real at 0.9.
 
-    cvkit review-video data/raw/clip.mp4 --model yolo11s-pose.pt --imgsz 1280
+    cvkit review-video clip.mp4 --model yolo26s-pose.pt --imgsz 1280
 
-Keypoints below --kpt-conf are hidden, because a pose model emits a full
-skeleton whether or not it can see one -- on footage where a table hides the
-torso, the shoulders are invented at 0.3 while the wrists are real at 0.9, and
-drawing both says the opposite of the truth.
-
---events takes a JSON file of frame ranges some other tool decided are worth
-looking at -- [{"start": 287, "end": 349, "label": "hand_up"}] -- draws a band
-while you are inside one, and repoints n/b at events instead of detections.
-cvkit does not compute them: the rule that fires an event is domain logic, and
-often a threshold calibrated to one camera, which has no place in a general
-tool. This only shows you what something else proposed, so you can judge it.
-
-    cvkit review-video data/raw/clip.mp4 --model yolo26s-pose.pt \
-        --imgsz 1280 --events events.json
-
---detections takes a pass some other tool already made, and skips loading a
-model at all -- which is how you review a backend cvkit cannot drive. The
-`detect` extra is Ultralytics and therefore AGPL; MediaPipe, RTMPose, ViTPose
-and RF-DETR are Apache-2.0, and a project avoiding AGPL cannot import
-Ultralytics even to look at its own results. Emit this shape from whatever you
-are running:
-
-    {"names": {"0": "person"},
-     "frames": [[[x1, y1, x2, y2, conf, cls, track_id, [[x, y, v], ...]]], ...]}
-
-one entry per frame, in order; track_id may be null and the keypoint list may
-be empty. That is what prescan caches, so the two are interchangeable.
+--events reads frame ranges something else judged interesting and bands them.
+--detections reads a pass something else made and loads no model at all, so an
+Apache-2.0 backend can be reviewed without importing AGPL Ultralytics.
 
     cvkit review-video clip.mp4 --detections mediapipe.json --events events.json
 
-n/b changing meaning is the trap here: on busy footage "next frame with a
-detection" is just "next frame" (1786 of 2090 on one measured clip), so with
-events loaded it is the events you want to step through.
+    events.json      [{"start": 287, "end": 349, "label": "hand_up"}]
+    detections.json  {"names": {"0": "person"}, "frames": [[[x1, y1, x2, y2,
+                     conf, cls, track_id, [[x, y, v], ...]]], ...]}
+
+one entry per frame, in order; the bare list prescan caches is accepted too.
+With events loaded n/b steps events, not detections -- on busy footage "next
+frame with a detection" is just "next frame" (1786 of 2090 on one clip).
 
 Keys (also printed, and shown in-window with h):
     SPACE  save this frame      u  undo last save
@@ -87,9 +69,7 @@ HELP = [
 def load_events(path, total):
     """[(start, end, label)] from a JSON file, sorted.
 
-    Parsed, not trusted (this file is generated or hand-edited, and gets
-    committed and shared): indices are coerced to int and clamped into the
-    video, so a bad range cannot seek outside it.
+    Parsed, not trusted: clamped so a bad range cannot seek outside the video.
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     out = []
@@ -102,17 +82,12 @@ def load_events(path, total):
 
 
 def load_detections(path, width, height):
-    """(names, per_frame) from a pass another tool made. See the module docstring.
+    """(names, per_frame) from a pass another tool made, or a prescan cache.
 
-    Takes either {"names": ..., "frames": [...]} or the bare list prescan
-    caches, so a cached pass can be handed to someone else as-is.
-
-    Parsed, not trusted: this is a file another program wrote, and every row is
-    indexed positionally downstream. A short row is refused here, naming the
-    frame, rather than raising an opaque unpack error three call sites later.
-    Coordinates are clamped into the frame for the same reason: OpenCV takes
-    C ints, so an out-of-range Python int does not draw off-screen, it raises
-    OverflowError from inside the render loop.
+    Parsed, not trusted. Rows are indexed positionally downstream, so a short
+    one is refused here naming the frame. Coordinates are clamped: OpenCV takes
+    C ints, so an out-of-range value raises OverflowError mid-render rather
+    than drawing off-screen.
     """
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(data, list):                      # a prescan cache
@@ -325,9 +300,7 @@ def run(args):
     print(f"detections {Path(args.detections).name} ({len(loaded)} frames), no model loaded"
           if loaded is not None else f"model {Path(args.model).name} on {dev}")
     if loaded is not None and len(loaded) != total:
-        # Silently overlaying frame n's boxes on a different frame n is the
-        # whole failure mode --detections invites; a variable-frame-rate source
-        # decoded by another library is enough to cause it.
+        # a VFR source decoded by another library is enough to cause this
         print(f"  WARNING: {len(loaded)} detection frames but the video has "
               f"{total} -- these were made from a different decode")
     print(f"classes {names} -> filter: {label}")

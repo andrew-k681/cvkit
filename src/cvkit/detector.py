@@ -11,11 +11,9 @@ Two traps this exists to close:
    to absolute before the chdir; a bare name is left alone so the download
    still happens.
 
-3. The chdir is not the whole story. Ultralytics also resolves downloads
-   against utils.WEIGHTS_DIR, which is Path(SETTINGS["weights_dir"]) and ships
-   *relative* ("weights"), so it lands wherever the process is standing when it
-   is finally used -- which is long after this chdir is restored. load()
-   rebinds it to an absolute path.
+3. Ultralytics resolves other downloads against utils.WEIGHTS_DIR, which ships
+   *relative*, so they land wherever the process is standing long after the
+   chdir is restored. load() rebinds it absolute.
 
 4. A .pt is a pickle, and Ultralytics unpickles it unrestricted unless
    ULTRALYTICS_SAFE_LOAD is set -- which old versions ignore. load() sets it
@@ -74,17 +72,11 @@ def safe_load_gap():
 def pin_weights_dir(ultralytics, wdir):
     """Point Ultralytics' WEIGHTS_DIR at an absolute path.
 
-    It is Path(SETTINGS["weights_dir"]) and ships relative ("weights"), so
-    every consumer resolves it against the cwd *at the moment it is used*.
-    Two of them run long after load()'s chdir is restored, and both import it
-    inside a function, so rebinding here reaches them:
-
-      * nn/text_model.py downloads CLIP for a world model on set_classes()
-        -- 353 MB, observed landing in a project root;
-      * utils/checks.py downloads yolo26n.pt for the AMP probe on train().
-
-    The chdir is still load()'s job: YOLO("yolo11s.pt") fetches a bare name
-    through the cwd without consulting WEIGHTS_DIR at all.
+    It ships relative, and the two consumers that matter import it inside a
+    function -- so they read it after load()'s chdir is restored and write into
+    the user's project: CLIP on a world model's set_classes() (353 MB,
+    observed) and yolo26n.pt for the AMP probe on train(). The chdir is still
+    needed: YOLO("yolo11s.pt") fetches a bare name without consulting this.
     """
     ultralytics.utils.WEIGHTS_DIR = Path(wdir)
 
