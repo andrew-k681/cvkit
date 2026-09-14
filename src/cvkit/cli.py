@@ -38,6 +38,10 @@ COMMANDS = {
                      "step through a video with detections overlaid, banking frames",
                      "detect"),
 
+    "bench": ("cvkit.bench", "add_args", "run",
+              "time a model on your own footage: latency, throughput, memory",
+              "detect"),
+
     # repair and train
     "fix-export": ("cvkit.dataset.fix_export", "add_args", "run",
                    "repair a YOLO export: polygon rows, cross-split duplicates",

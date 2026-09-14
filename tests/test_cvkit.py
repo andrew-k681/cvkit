@@ -396,3 +396,142 @@ def test_a_directory_is_not_reported_as_corrupt_yaml(tmp_path):
     with pytest.raises(SystemExit) as e:
         train.check_data_yaml(d)
     assert "directory" in str(e.value)
+
+
+# ------------------------------------------------------- review-video overlay
+
+@needs_images
+def test_draw_reads_a_prescan_tuple_and_hides_weak_keypoints():
+    """Pins the cached tuple's shape and the threshold: a pose model invents
+    the keypoints it cannot see."""
+    import numpy as np
+
+    from cvkit.mining.review_video import draw
+
+    strong, weak = (30, 40, 0.9), (90, 40, 0.1)
+    box = (10, 10, 110, 70, 0.8, 0, 7, [list(strong), list(weak)])
+    view = draw(np.zeros((80, 120, 3), dtype=np.uint8), [box], 0, 1, 25.0,
+                0.25, 0, True, False, "clip", {0: "person"}, "", kpt_conf=0.5)
+
+    assert view[strong[1], strong[0]].any()
+    assert not view[weak[1], weak[0]].any()
+
+
+@needs_images
+def test_event_ranges_are_clamped_and_reversed_ones_refused(tmp_path):
+    """Parsed, not trusted: an out-of-range seek, a reversed range matches
+    nothing."""
+    from cvkit.mining.review_video import load_events
+
+    p = tmp_path / "events.json"
+    p.write_text('[{"start": -5, "end": 99999, "label": "hand_up"}]')
+    assert load_events(p, 2090) == [(0, 2089, "hand_up")]
+
+    # both ends, or a range wholly outside survives inverted and matches nothing
+    p.write_text('[{"start": 5000, "end": 6000}]')
+    assert load_events(p, 2090) == [(2089, 2089, "event")]
+    p.write_text('[{"start": -50, "end": -10}]')
+    assert load_events(p, 2090) == [(0, 0, "event")]
+
+    p.write_text('[{"start": 90, "end": 10}]')
+    with pytest.raises(SystemExit) as e:
+        load_events(p, 2090)
+    assert "after end" in str(e.value)
+
+
+def test_weights_dir_is_pinned_absolute(monkeypatch, tmp_path):
+    """It ships relative, so it resolves against the cwd after load()'s chdir
+    is restored. Observed: a 353 MB ViT-B-32.pt in a project root."""
+    import pathlib
+
+    _fake_ultralytics(monkeypatch)
+    ul = sys.modules["ultralytics"]
+    ul.utils = sys.modules["ultralytics.utils"]
+    ul.utils.WEIGHTS_DIR = pathlib.Path("weights")       # the shipped default
+
+    detector.pin_weights_dir(ul, tmp_path / "w")
+
+    assert ul.utils.WEIGHTS_DIR.is_absolute()
+    assert ul.utils.WEIGHTS_DIR == tmp_path / "w"
+
+
+@needs_images
+def test_short_detection_rows_are_refused_at_load(tmp_path):
+    """Indexed positionally downstream, so a short row must fail here."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    p.write_text('{"names": {"0": "person"}, "frames": '
+                 '[[[1, 2, 3, 4, 0.9, 0, 7, [[5, 6, 0.8]]]], [[1, 2, 3, 4, 0.9, 0]]]}')
+    with pytest.raises(SystemExit) as e:
+        load_detections(p, 100, 100)
+    assert "frame 1" in str(e.value) and "6 fields" in str(e.value)
+
+    p.write_text('{"frames": [[[1, 2, 3, 4, 0.9, 0, null, []]]]}')
+    names, frames = load_detections(p, 100, 100)
+    assert names == {0: "object"}                      # default when unnamed
+    assert frames[0][0][6] is None and frames[0][0][7] == []
+
+
+@needs_images
+def test_detections_accept_a_bare_prescan_cache(tmp_path):
+    """prescan writes a bare list; the docs promise it is accepted."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "cache.json"
+    p.write_text('[[[1, 2, 3, 4, 0.9, 0, 7, [[5, 6, 0.8]]]], []]')
+    names, frames = load_detections(p, 100, 100)
+    assert names == {0: "object"} and len(frames) == 2 and frames[1] == []
+
+
+@needs_images
+def test_detection_coordinates_are_clamped_into_the_frame(tmp_path):
+    """OpenCV takes C ints: out of range raises OverflowError mid-render."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    p.write_text('{"frames": [[[-9, -9, 10000000000000000000, 5, 0.9, 0, null, '
+                 '[[-4, 99999999999999999999, 0.8]]]]]}')
+    _names, frames = load_detections(p, 640, 480)
+    x1, y1, x2, y2 = frames[0][0][:4]
+    assert (x1, y1, x2, y2) == (0, 0, 640, 5)
+    assert frames[0][0][7][0][:2] == [0, 480]
+
+
+@needs_images
+def test_unusable_detection_values_are_refused(tmp_path):
+    """json.loads accepts NaN and Infinity; int() of either escapes the clamp."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    for bad in ('NaN', 'Infinity', '"x"'):
+        p.write_text('{"frames": [[[%s, 2, 3, 4, 0.9, 0, null, []]]]}' % bad)
+        with pytest.raises(SystemExit) as e:
+            load_detections(p, 640, 480)
+        assert "frame 0" in str(e.value)
+
+
+@needs_images
+def test_a_detections_file_that_is_not_frames_is_refused(tmp_path):
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    p.write_text('{"names": {"0": "person"}}')
+    with pytest.raises(SystemExit) as e:
+        load_detections(p, 100, 100)
+    assert "frames" in str(e.value)
+
+
+@needs_images
+def test_peak_rss_unit_differs_by_platform(monkeypatch):
+    """bytes on macOS/BSD, kilobytes on Linux: 1.8 GB reads as 1.8 MB."""
+    import resource
+
+    from cvkit import bench
+
+    monkeypatch.setattr(resource, "getrusage",
+                        lambda _who: types.SimpleNamespace(ru_maxrss=2 * 1024 * 1024))
+    monkeypatch.setattr(bench.sys, "platform", "darwin")
+    assert bench.peak_rss_mb() == 2                 # bytes -> 2 MB
+    monkeypatch.setattr(bench.sys, "platform", "linux")
+    assert bench.peak_rss_mb() == 2048              # kilobytes -> 2 GB

@@ -11,7 +11,11 @@ Two traps this exists to close:
    to absolute before the chdir; a bare name is left alone so the download
    still happens.
 
-3. A .pt is a pickle, and Ultralytics unpickles it unrestricted unless
+3. Ultralytics resolves other downloads against utils.WEIGHTS_DIR, which ships
+   *relative*, so they land wherever the process is standing long after the
+   chdir is restored. load() rebinds it absolute.
+
+4. A .pt is a pickle, and Ultralytics unpickles it unrestricted unless
    ULTRALYTICS_SAFE_LOAD is set -- which old versions ignore. load() sets it
    and safe_load_gap() checks it took.
 
@@ -65,13 +69,25 @@ def safe_load_gap():
     return None
 
 
+def pin_weights_dir(ultralytics, wdir):
+    """Point Ultralytics' WEIGHTS_DIR at an absolute path.
+
+    It ships relative, and the two consumers that matter import it inside a
+    function -- so they read it after load()'s chdir is restored and write into
+    the user's project: CLIP on a world model's set_classes() (353 MB,
+    observed) and yolo26n.pt for the AMP probe on train(). The chdir is still
+    needed: YOLO("yolo11s.pt") fetches a bare name without consulting this.
+    """
+    ultralytics.utils.WEIGHTS_DIR = Path(wdir)
+
+
 def load(model_name, weights_dir, device=None):
     """(YOLO model, device). See the module docstring for why this is fiddly."""
     candidate = Path(model_name)
     if candidate.exists():
         model_name = str(candidate.resolve())
 
-    wdir = Path(weights_dir)
+    wdir = Path(weights_dir).resolve()          # absolute: see pin_weights_dir
     wdir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(wdir))
     # Must precede the ultralytics import below: the flag is read once, into a
@@ -83,7 +99,9 @@ def load(model_name, weights_dir, device=None):
     cwd = Path.cwd()
     os.chdir(wdir)
     try:
-        YOLO = config.require("ultralytics", "detect").YOLO
+        ul = config.require("ultralytics", "detect")
+        pin_weights_dir(ul, wdir)
+        YOLO = ul.YOLO
         gap = None if opted_out else safe_load_gap()
         if gap:
             raise SystemExit(

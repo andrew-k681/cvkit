@@ -35,7 +35,7 @@ use require, and a command whose extra is missing names the one to install.
 | `roboflow-api` | `requests` | `tag` | 5 packages |
 | `images` | `numpy`, `opencv-python` | `sheets`, `collect`, `verify`, `record`, `fix-export` | 2 packages |
 | `roboflow` | `roboflow`, `requests` | `upload-images`, `mark-null`, `upload-weights` | 33 packages |
-| `detect` | `ultralytics`, `torch`, `numpy`, `opencv-python`, `pyyaml` | `mine`, `train`, `review-video` | the big one |
+| `detect` | `ultralytics`, `torch`, `numpy`, `opencv-python`, `pyyaml` | `mine`, `train`, `review-video`, `bench` | the big one |
 | `all` | everything above | | |
 
 Combine them: `pip install "cvkit[images,roboflow]"`. `tag` has its own light
@@ -154,6 +154,72 @@ n / b  next / previous frame with a detection (wraps)
 = / -  confidence      o  overlay               h  help
 ```
 
+A pose checkpoint works here too, and draws its keypoints:
+
+```bash
+cvkit review-video data/raw/clip.mp4 --model yolo11s-pose.pt --imgsz 1280
+```
+
+Keypoints below `--kpt-conf` (default 0.5) are hidden, because a pose model
+emits a whole skeleton whether or not it can see one. Where a table hides the
+torso it invents the shoulders at 0.3 while the wrists are real at 0.9, and
+drawing both says the opposite of what the model actually found.
+
+`--events` takes a JSON file of frame ranges something else decided are worth
+looking at, draws a band while you are inside one, and repoints `n`/`b` at
+events instead of detections:
+
+```bash
+cvkit review-video data/raw/clip.mp4 --events events.json
+```
+```json
+[{"start": 287, "end": 349, "label": "hand_up"}]
+```
+
+cvkit does not compute them. The rule that fires an event is domain logic, and
+usually a threshold calibrated to one camera; this only shows you what
+something else proposed, so you can judge it. Repointing `n`/`b` is the point:
+on busy footage "next frame with a detection" is just "next frame" -- 1786 of
+2090 frames on one measured clip.
+
+`--detections` goes further and reviews a pass another tool made, loading no
+model at all:
+
+```bash
+cvkit review-video clip.mp4 --detections mediapipe.json --events events.json
+```
+```json
+{"names": {"0": "person"},
+ "frames": [[[12, 34, 56, 78, 0.91, 0, 7, [[40, 50, 0.86]]]], []]}
+```
+
+One entry per frame, in order; `track_id` may be null and the keypoint list may
+be empty. The bare list the tracking pass caches is accepted too, so a cached
+pass can be handed to someone else as-is. Coordinates are clamped into the
+frame and a frame-count mismatch is warned about — overlaying one decode's
+boxes on another's frames is the failure this invites.
+
+This exists for licensing. The `detect` extra is Ultralytics and therefore
+**AGPL-3.0**; MediaPipe, RTMPose, ViTPose and RF-DETR are Apache-2.0, and a
+project avoiding AGPL cannot import Ultralytics even to look at its own
+results. With `--detections`, `review-video` runs in an install that has
+neither Ultralytics nor torch.
+
+### 4b. Know what it costs
+
+```bash
+cvkit bench data/raw/clip.mp4 --model yolo26s-pose.pt --imgsz 1280
+```
+
+Published numbers are COCO at 640 on a datacentre GPU; what decides whether a
+model fits an edge box is your frames, at your imgsz, on your hardware. Run it
+once per model and compare rows — one process per model on purpose, since a
+second model in the same process makes the memory figure meaningless.
+
+Latency is a median and p90, never a mean: the tail is what breaks frame rate.
+The warmup frames are discarded because the first inferences pay for lazy init
+and kernel compilation.
+
 ### 5. Keep the dataset honest
 
 ```bash
@@ -198,6 +264,12 @@ that pre-labels your next batch.
 into the *current working directory*. Everything that loads a model `chdir`s
 into `--weights-dir` (`data/mining/weights`, gitignored) first, resolving a
 relative `--model` to absolute so the `chdir` cannot break it.
+
+That covers only the downloads that read the cwd. Ultralytics resolves others
+against `utils.WEIGHTS_DIR`, which ships *relative* (`"weights"`) and is used
+long after the `chdir` is restored — CLIP on a world model's `set_classes()`
+(353 MB, measured landing in a project root) and the AMP probe on `train()`.
+cvkit rebinds it to an absolute path at load time.
 
 **Run what it reads.** A `urls.txt` line cannot become a yt-dlp option, a
 `data.yaml` carrying a `download:` key is refused rather than handed to

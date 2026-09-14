@@ -24,6 +24,7 @@ src/cvkit/
   paths.py        the Workspace class: default directory layout under a project root
   naming.py       frame filename construction and parsing
   detector.py     Ultralytics model loading, device pick, class resolution
+  bench.py        latency, throughput and memory on your own footage
   imageops.py     flatness() and descriptor() — shared by mining and fix_export
   train.py
   video/          download.py, frames.py
@@ -112,6 +113,16 @@ and Ultralytics loads one with `weights_only=False` unless told otherwise —
 is read once into a module constant, so it must be set *before* ultralytics is
 imported; that is why the `config.require` call sits below it, not above.
 
+The `chdir` is not sufficient on its own. Ultralytics resolves some downloads
+against `utils.WEIGHTS_DIR` instead of the cwd, and it ships *relative*
+(`Path(SETTINGS["weights_dir"])`, `"weights"`). Both consumers that matter
+import it *inside a function*, so they read it after the `chdir` is restored
+and write into the user's project root: `nn/text_model.py` fetching CLIP on a
+world model's `set_classes()` (353 MB, observed), and `utils/checks.py`
+fetching `yolo26n.pt` for the AMP probe on `train()`. `pin_weights_dir` rebinds
+it absolute, which reaches both precisely because they import it late. Do not
+drop it for the `chdir`, or the reverse — they cover different download paths.
+
 **Setting the flag is not evidence it took**, hence `safe_load_gap()` and the
 refusal in `load()`. Both halves fail *quietly*: the flag does not exist before
 ultralytics 8.4.67 (bisected, not guessed) and its torch probe needs 2.6 —
@@ -176,7 +187,7 @@ Two traps, both already fixed, both easy to reintroduce:
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/ -q        # 49 tests, ~0.2s (7 skip without [images])
+python -m pytest tests/ -q        # 58 tests, ~0.2s (15 skip without [images])
 ```
 
 Tests cover the arithmetic that silently corrupts a dataset when wrong: frame
@@ -187,12 +198,13 @@ conventions 5, 6 and 7 — the urls-file parser and the `--` separator, the
 stubs standing in for `requests` and `ultralytics`.
 
 They require **no** torch, network or GUI, but they are not free of *every*
-extra: seven import a pure function out of `fix_export.py` or `mining/sheets.py`,
-which carry a module-level numpy/cv2 import by convention 1, and five need
-PyYAML. All twelve `skipif` rather than fail — as an eager import this broke
-collection for everyone, unnoticed because CI had never run. Do not tidy those
-imports back to the top. Two of the PyYAML five assert only
-`raises(SystemExit)`, which a missing import satisfies: without the skip they
+extra: fifteen import a pure function out of `fix_export.py`, `mining/sheets.py`
+or `mining/review_video.py`, which carry a module-level numpy/cv2 import by
+convention 1, and five need PyYAML. All twenty `skipif` rather than fail — as
+an eager import this broke collection for everyone, unnoticed because CI had
+never run. Do not tidy those imports back to the top. Two of the PyYAML five
+assert only `raises(SystemExit)`, which a missing import satisfies: without the
+skip they
 would pass for the wrong reason.
 
 Not covered by tests, and needing manual verification when touched:
