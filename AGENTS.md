@@ -238,12 +238,19 @@ checks the fifth `COMMANDS` field. A plain `|| exit 1` cannot work here.
 
 ## Style
 
-Match what is there. Specifically:
+**Minimalism is the default, and it is not negotiable.** The smallest change
+that does the job, the fewest lines that say it, each fact stated once in one
+place. Before writing a paragraph, check whether the code, a docstring or this
+file already carries it. Prefer deleting to explaining. This applies equally to
+code, comments, docs, tests and commit messages — the prose here has been cut
+back once already for restating itself.
+
+Match what is there otherwise. Specifically:
 
 - Module docstrings carry the *usage examples* and the reason the module
   exists. Comments explain **why**, not what — most comments in this repo
   record a trap that was hit. Keep that; do not strip them as "noise", and do
-  not pad new code with narration.
+  not pad new code with narration. One line per trap, not a paragraph.
 - Prefer a clear `argparse` flag over a config file or a new dependency.
 - Print progress for anything that loops over many files (`i/total ok/failed`,
   flushed). Long passes write output incrementally so a crash at 90% does not

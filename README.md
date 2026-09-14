@@ -2,12 +2,10 @@
 
 Command-line toolkit for building object-detection datasets out of video.
 
-You have some footage and a class you care about. Getting from there to a
-trained detector is mostly not modelling — it is sourcing frames, deciding
-which of the thousands are worth a human's attention, reviewing them without
-losing track of what you already judged, and keeping the dataset itself honest.
-`cvkit` is the set of tools for that part, pulled out of a working project so
-it can be reused in the next one.
+Getting from footage to a trained detector is mostly not modelling — it is
+sourcing frames, deciding which of the thousands deserve a human's attention,
+reviewing them without losing track of what you already judged, and keeping the
+dataset honest. `cvkit` is the tools for that part.
 
 **The rule the whole toolkit is built on: detectors propose, humans dispose.**
 Nothing here writes a label you did not look at.
@@ -27,9 +25,8 @@ download  →  frames  →  mine  →  sheets  →  collect  →  verify  →  u
 pip install "cvkit[all] @ git+https://github.com/andrew-k681/cvkit"
 ```
 
-cvkit has **no runtime dependencies**. Nothing in the base install imports a
-third-party package, so you install only what the commands you actually use
-require:
+cvkit has **no runtime dependencies** — you install only what the commands you
+use require, and a command whose extra is missing names the one to install.
 
 | extra | brings | needed by | weight |
 |---|---|---|---|
@@ -41,27 +38,20 @@ require:
 | `detect` | `ultralytics`, `torch`, `numpy`, `opencv-python`, `pyyaml` | `mine`, `train`, `review-video` | the big one |
 | `all` | everything above | | |
 
-Combine them: `pip install "cvkit[images,roboflow]"`. Run a command whose extra
-is missing and it tells you exactly which one to install — no guessing.
+Combine them: `pip install "cvkit[images,roboflow]"`. `tag` has its own light
+extra because it talks to the REST API directly, where the SDK would pull in
+Matplotlib, Pillow, Typer and a second OpenCV. `download` and `frames` also
+need `ffmpeg` on your PATH.
 
-`tag` gets its own light extra because it talks to the REST API directly; the
-official SDK pulls in Matplotlib, Pillow, Typer and a second copy of OpenCV,
-which a tagging loop has no use for.
-
-`download` and `frames` also need `ffmpeg`/`ffprobe` on your PATH
-(`brew install ffmpeg`).
-
-> Ultralytics and its pretrained checkpoints are **AGPL-3.0**. cvkit itself is
-> MIT and does not bundle them — installing the `detect` extra is your choice,
-> and the licence obligations of anything you ship with those weights are
-> yours to satisfy. cvkit at least keeps the downloads out of your repo: see
-> [Weights](#weights-never-land-in-your-repo).
+> The `detect` extra installs Ultralytics, which is **AGPL-3.0**, as are its
+> pretrained checkpoints and any model you fine-tune from them. cvkit is MIT
+> and bundles neither — read [NOTICE.md](NOTICE.md) before you ship.
 
 ## Configuration
 
 Paths default to `./data` and `./runs` under the current directory, so one
-install serves every project — `cd` into a project and run. Override with
-`--root` or `CVKIT_ROOT`.
+install serves every project — `cd` in and run. Override with `--root` or
+`CVKIT_ROOT`.
 
 ```
 data/
@@ -74,7 +64,7 @@ data/
 runs/           training output
 ```
 
-Credentials come from the environment or a `.env` file. Copy `.env.example`:
+Credentials come from the environment or a `.env` file — copy `.env.example`:
 
 ```dotenv
 ROBOFLOW_API_KEY=...
@@ -82,10 +72,8 @@ ROBOFLOW_WORKSPACE=your-workspace
 ROBOFLOW_PROJECT=your-project
 ```
 
-cvkit reads one variable at a time out of that file and **never sources it** —
-sourcing executes the file, which would export every other secret it holds and
-run anything that got appended to it. Never pass a key as a command-line flag
-either; it lands in your shell history.
+That file is read one variable at a time and never sourced, and a key is never
+accepted as a flag — it would land in your shell history.
 
 ## The loop
 
@@ -98,14 +86,12 @@ cvkit frames --fps 2 --force
 ```
 
 Frames are named `<video_id>_mp4-<index>.jpg`, matching what Roboflow produces
-when it splits a video itself — so a frame you extracted locally and the same
-frame inside an export are recognisably the same image. That is what lets the
-mining step skip frames you have already labelled. Change it with
-`--frame-sep`.
+when it splits a video itself, so a locally extracted frame and the same frame
+inside an export are recognisably the same image — which is what lets mining
+skip frames you have already labelled. Change it with `--frame-sep`.
 
-If a platform already holds frames from these videos its numbering probably
-does not start where a fresh extraction does. Recover the offset once and
-record it:
+If a platform already holds frames from these videos, its numbering probably
+does not start where a fresh extraction does. Recover the offset once:
 
 ```bash
 cvkit frames --offset clip01=15 --offset clip02=26
@@ -119,13 +105,12 @@ cvkit mine --export data/my-export --classes person
 cvkit mine --conf 0.03 --imgsz 1280          # even more recall
 ```
 
-Run deliberately at a **low** confidence and a **high** resolution. The goal is
-recall: a frame this reports as empty should really be empty. Frames already in
-`--export`, and their ±2 neighbours, are skipped — a neighbour of a labelled
-frame usually holds the same target and teaches nothing.
+Deliberately **low** confidence and **high** resolution: the goal is recall, so
+that a frame reported empty really is. Frames already in `--export`, and their
+±2 neighbours, are skipped — a neighbour usually holds the same target.
 
-Run it twice with different models and both `scores*.csv` files are merged, a
-frame counting as empty only if every pass agrees:
+Run it twice with different models and both `scores*.csv` are merged, a frame
+counting as empty only if every pass agrees:
 
 ```bash
 cvkit mine --model yolo11x.pt --rescore scores.csv --out scores_pass2.csv
@@ -140,17 +125,14 @@ cvkit verify                                  # re-render survivors at 960x540
 cvkit record --bad "3 11 12"                  # record verdicts
 ```
 
-Two passes on purpose. 36 tiles at 320×180 is fine for triage and
-demonstrably too small for the final call — small, distant and low-contrast
-targets survive it. Anything heading into training gets looked at again at a
-size where you can actually see it.
+Two passes on purpose: 36 tiles at 320×180 is fine for triage and demonstrably
+too small for the final call, so anything heading into training is looked at
+again at a size where you can see it. `record` writes `rejected_frames.txt` and
+`verified_ok.txt`, so a frame you have judged never comes back on a sheet —
+sheets are cheap to rebuild, your attention is not.
 
-`record` writes `rejected_frames.txt` and `verified_ok.txt`, so a frame you
-have already judged never comes back on a sheet. Sheets are cheap to rebuild;
-your attention is not.
-
-`sheets --mode positive --min-conf 0.35` flips the whole thing around and
-shortlists frames that *do* contain targets, for annotation.
+`sheets --mode positive --min-conf 0.35` flips it around and shortlists frames
+that *do* contain targets, for annotation.
 
 ### 4. Or review a video directly
 
@@ -158,13 +140,12 @@ shortlists frames that *do* contain targets, for annotation.
 cvkit review-video data/raw/clip.mp4 --model runs/baseline/weights/best.pt
 ```
 
-The active-learning loop without the upload round-trip: step through the video
-with detections drawn on, watch for where the model is unsure or wrong, hit
-SPACE, and the clean full-resolution frame lands in a folder ready to upload.
-
-One sequential tracking pass runs at startup and is cached to disk, so
-navigation and "jump to the next detection" are pure lookups with no inference.
-Adjusting the confidence threshold re-filters the cache instead of re-running.
+The active-learning loop without the upload round-trip: step through with
+detections drawn on, watch for where the model is unsure or wrong, hit SPACE,
+and the clean full-resolution frame lands ready to upload. One sequential
+tracking pass runs at startup and is cached, so navigation and "jump to the
+next detection" are lookups with no inference; changing the threshold
+re-filters that cache instead of re-running it.
 
 ```
 SPACE save frame       u  undo last save        q / ESC  quit
@@ -186,12 +167,9 @@ silently wreck a run:
 
 - **Mixed polygon/bbox label files.** If any row has more than 5 fields,
   Ultralytics parses the *whole file* as segmentation and reinterprets the
-  plain `cls cx cy w h` rows as 2-point polygons — producing garbage boxes with
-  no error message. Polygon rows are converted to their bounding box so every
-  file is uniform.
-- **Near-duplicate images straddling splits.** A valid/test frame that is
-  visually near-identical to a train frame inflates your metric. The eval copy
-  is moved into train so the evaluation splits stay clean.
+  plain `cls cx cy w h` rows as 2-point polygons — garbage boxes, no error.
+- **Near-duplicate images straddling splits.** An eval frame near-identical to
+  a train frame inflates your metric; the eval copy is moved into train.
 
 ### 6. Ship it
 
@@ -203,81 +181,62 @@ cvkit train --data data/my-export/data.yaml
 cvkit upload-weights --version 3 --run runs/baseline
 ```
 
-`mark-null` exists because of a genuinely surprising platform behaviour: an
-uploaded image with no annotation stays "unannotated" and **never reaches a
-dataset version**, no matter how many times you click Add to Dataset. It needs
-an explicit *empty* annotation to record "this frame deliberately contains
-nothing". Roboflow rejects an empty YOLO `.txt` as an unrecognised format, so
-this writes Pascal VOC with zero `<object>` elements.
-
-Background images are not filler. A detector that has never seen an empty scene
-will confidently find your class in one.
+`mark-null` exists for a genuinely surprising platform behaviour: an uploaded
+image with no annotation stays "unannotated" and **never reaches a dataset
+version**, however often you click Add to Dataset. It needs an explicit *empty*
+annotation, and Roboflow rejects an empty YOLO `.txt`, so this writes Pascal
+VOC with zero `<object>` elements. Background images are not filler — a
+detector that has never seen an empty scene will confidently find your class in
+one.
 
 `upload-weights` closes the loop: the model you just trained becomes the thing
-that pre-labels your next batch of frames.
+that pre-labels your next batch.
 
-## Weights never land in your repo
+## Two things cvkit will not do
 
-Ultralytics downloads a bare weight name into the **current working
-directory**. Run a script from a repo root and you have just added a hundred
-megabytes of AGPL-licensed checkpoint to that repo, and probably committed it.
+**Drop checkpoints in your repo.** Ultralytics downloads a bare weight name
+into the *current working directory*. Everything that loads a model `chdir`s
+into `--weights-dir` (`data/mining/weights`, gitignored) first, resolving a
+relative `--model` to absolute so the `chdir` cannot break it.
 
-Everything in cvkit that loads a model `chdir`s into `--weights-dir`
-(`data/mining/weights` by default, gitignored) for the duration of the load,
-and resolves a relative `--model` path to absolute first so the `chdir` cannot
-break it.
+**Run what it reads.** A `urls.txt` line cannot become a yt-dlp option, a
+`data.yaml` carrying a `download:` key is refused rather than handed to
+Ultralytics to `exec()`, and a checkpoint is unpickled under Ultralytics'
+restricted loader — which cvkit checks is genuinely in force rather than
+assuming it.
 
 ## Notes from use
 
 - **Fix the seed.** Evaluation splits on a hand-built dataset are small — a
   hundred images is normal — so run-to-run noise is comparable to a real
-  improvement. Compare runs at the same seed or not at all.
-- **Keep some branding negatives.** Without title cards and end graphics in
-  the training set, a model will confidently detect a stylised logo as a real
-  object — 0.82 confidence, in one measured case. `fix-export --drop-graphics` removes them and is **off by
-  default** for exactly this reason — use it only to clear out *duplicate*
-  branding, and keep a few.
+  improvement. Compare at the same seed or not at all.
+- **Keep some branding negatives.** Without title cards in training, a model
+  detects a stylised logo as a real object — 0.82 confidence in one measured
+  case. `fix-export --drop-graphics` is **off by default** for this reason; use
+  it only to clear *duplicate* branding, and keep a few.
 - **Roboflow's search pagination is not stable.** Ordering shifts between
-  calls, so one sweep returns duplicates and misses rows — an observed pass
-  over 800 images came back with 735 rows holding 657 unique ids. cvkit sweeps
-  repeatedly until the set stops growing. It is a workaround, not a guarantee;
-  if a count looks short, run it again.
+  calls, so one sweep both duplicates and misses rows — an observed pass over
+  800 images returned 735 rows holding 657 unique ids. cvkit sweeps until the
+  set stops growing; if a count looks short, run it again.
 - **Geometry is the only marker of which tool drew an object.** There is no
-  author field, and `lastSet` records the most recent edit, which says nothing
-  about how the object was drawn. `tag --only-boxes` uses the presence of a
-  `points` array to tell an assisted polygon from a hand-drawn box.
+  author field, and `lastSet` records the last edit, not how the object was
+  drawn. `tag --only-boxes` keys off the presence of a `points` array.
 
 ## Software bill of materials
 
 [`bom.json`](bom.json) is a [CycloneDX](https://cyclonedx.org) 1.6 SBOM of the
-full dependency closure — every component with a concrete version and
-PackageURL, ready to ingest into [Dependency-Track](https://dependencytrack.org)
-or any other CycloneDX consumer.
+full dependency closure, ready for [Dependency-Track](https://dependencytrack.org).
 
 ```bash
 ./scripts/make_bom.sh          # regenerate
 ./scripts/make_bom.sh --check  # fail if it is stale
 ```
 
-It is built from a real, fully resolved environment with every extra
-installed, because declared ranges (`>=1.24`) are not matchable against
-advisories — Dependency-Track needs pinned versions. The environment is
-created without `pip`/`setuptools` preinstalled so venv bootstrap does not
-appear as a false component. (`setuptools` still appears: `torch` genuinely
-requires it.)
-
-The committed file is a **snapshot** of one resolution. CI regenerates and
-validates a current one on every push and uploads it as a build artifact, but
-deliberately does not fail on drift from the committed copy — an unrelated
-upstream release would break every PR. Refresh it deliberately, at release
-time. To push each release into Dependency-Track:
-
-```bash
-curl -X POST "$DTRACK_URL/api/v1/bom" \
-  -H "X-Api-Key: $DTRACK_API_KEY" \
-  -F "project=$DTRACK_PROJECT_UUID" \
-  -F "bom=@bom.json"
-```
+It is built from a real resolved environment, because declared ranges
+(`>=1.24`) are not matchable against advisories. The committed file is a
+snapshot: CI regenerates and validates a current one on every push and uploads
+it as an artifact, but deliberately does not fail on drift — an unrelated
+upstream release would otherwise break every PR. Refresh it at release time.
 
 ## Contributing
 
@@ -290,22 +249,17 @@ python -m pytest tests/ -q
 [AGENTS.md](AGENTS.md) is the contributor guide — architecture, the contract
 every command implements, the conventions that must not be broken, and the
 platform traps already paid for. Read it before changing code, whether you are
-a person or an AI assistant. (`CLAUDE.md` and
-`.github/copilot-instructions.md` just point at it, so every tool gets the same
-instructions.)
+a person or an AI. (`CLAUDE.md` and `.github/copilot-instructions.md` point at
+it, so every tool gets the same instructions.)
 
 ## Status
 
-Extracted from a working project and generalised. The Roboflow commands lean
-on undocumented endpoint behaviour and may need adjusting as the API moves.
-Issues and PRs welcome.
+Extracted from a working project and generalised. The Roboflow commands lean on
+undocumented endpoint behaviour and may need adjusting as the API moves. Issues
+and PRs welcome.
 
 ## Licence
 
 cvkit is MIT — see [LICENSE](LICENSE). It bundles no model weights and no
-third-party code.
-
-**Your model weights are licensed separately, and it matters.** The `detect`
-extra installs Ultralytics, which is AGPL-3.0, as are its pretrained
-checkpoints — and a model you fine-tune from them inherits that. See
-[NOTICE.md](NOTICE.md) before shipping anything built with this.
+third-party code. Your weights are licensed separately and it matters: see
+[NOTICE.md](NOTICE.md).
