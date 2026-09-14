@@ -165,6 +165,23 @@ emits a whole skeleton whether or not it can see one. Where a table hides the
 torso it invents the shoulders at 0.3 while the wrists are real at 0.9, and
 drawing both says the opposite of what the model actually found.
 
+`--events` takes a JSON file of frame ranges something else decided are worth
+looking at, draws a band while you are inside one, and repoints `n`/`b` at
+events instead of detections:
+
+```bash
+cvkit review-video data/raw/clip.mp4 --events events.json
+```
+```json
+[{"start": 287, "end": 349, "label": "hand_up"}]
+```
+
+cvkit does not compute them. The rule that fires an event is domain logic, and
+usually a threshold calibrated to one camera; this only shows you what
+something else proposed, so you can judge it. Repointing `n`/`b` is the point:
+on busy footage "next frame with a detection" is just "next frame" -- 1786 of
+2090 frames on one measured clip.
+
 ### 5. Keep the dataset honest
 
 ```bash

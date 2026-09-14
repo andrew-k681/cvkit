@@ -18,6 +18,20 @@ skeleton whether or not it can see one -- on footage where a table hides the
 torso, the shoulders are invented at 0.3 while the wrists are real at 0.9, and
 drawing both says the opposite of the truth.
 
+--events takes a JSON file of frame ranges some other tool decided are worth
+looking at -- [{"start": 287, "end": 349, "label": "hand_up"}] -- draws a band
+while you are inside one, and repoints n/b at events instead of detections.
+cvkit does not compute them: the rule that fires an event is domain logic, and
+often a threshold calibrated to one camera, which has no place in a general
+tool. This only shows you what something else proposed, so you can judge it.
+
+    cvkit review-video data/raw/clip.mp4 --model yolo26s-pose.pt \
+        --imgsz 1280 --events events.json
+
+n/b changing meaning is the trap here: on busy footage "next frame with a
+detection" is just "next frame" (1786 of 2090 on one measured clip), so with
+events loaded it is the events you want to step through.
+
 Keys (also printed, and shown in-window with h):
     SPACE  save this frame      u  undo last save
     q or ESC quits; so does closing the window, or Ctrl-C in the terminal
@@ -53,6 +67,23 @@ HELP = [
     "]/[  +/- 10x stride   n/b next/prev detection (wraps)",
     "=/-  confidence       o overlay   h help   q quit",
 ]
+
+
+def load_events(path, total):
+    """[(start, end, label)] from a JSON file, sorted.
+
+    Parsed, not trusted (this file is generated or hand-edited, and gets
+    committed and shared): indices are coerced to int and clamped into the
+    video, so a bad range cannot seek outside it.
+    """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    out = []
+    for e in data:
+        a, b = int(e["start"]), int(e["end"])
+        if a > b:
+            raise SystemExit(f"event {e!r}: start is after end")
+        out.append((max(0, a), min(total - 1, b), str(e.get("label", "event"))))
+    return sorted(out)
 
 
 def cache_file(cache_dir, video, model_path, imgsz, track_conf):
@@ -123,7 +154,7 @@ def prescan(model, video, dev, args, cache_dir):
 
 
 def draw(frame, boxes, idx, total, fps, conf, saved, overlay, show_help,
-         name, names, msg, kpt_conf=0.5):
+         name, names, msg, kpt_conf=0.5, event=None):
     view = frame.copy()
     if overlay:
         for x1, y1, x2, y2, c, k, tid, pts in boxes:
@@ -142,6 +173,15 @@ def draw(frame, boxes, idx, total, fps, conf, saved, overlay, show_help,
             (tw, th), _ = cv2.getTextSize(tag, FONT, 0.5, 1)
             cv2.rectangle(view, (x1, y1 - th - 6), (x1 + tw + 6, y1), col, -1)
             cv2.putText(view, tag, (x1 + 3, y1 - 4), FONT, 0.5, (0, 0, 0), 1)
+
+    if event:
+        n, total_ev, (a, b, lab) = event
+        h_, w_ = view.shape[:2]
+        cv2.rectangle(view, (0, 0), (w_ - 1, h_ - 1), (0, 0, 255), 6)
+        band = f"{lab}  event {n + 1}/{total_ev}  frames {a}-{b}"
+        (tw, th), _ = cv2.getTextSize(band, FONT, 0.9, 2)
+        cv2.rectangle(view, (0, 58), (tw + 20, 58 + th + 16), (0, 0, 255), -1)
+        cv2.putText(view, band, (10, 58 + th + 4), FONT, 0.9, (255, 255, 255), 2)
 
     best = max((b[4] for b in boxes), default=0.0)
     per_cls = " ".join(f"{names.get(k, k)}:{sum(1 for b in boxes if b[5] == k)}"
@@ -184,6 +224,9 @@ def add_args(ap):
                     help="floor for the tracking pass; --conf then filters the "
                          "cached result, so =/- needs no re-run")
     ap.add_argument("--rescan", action="store_true", help="ignore the cached pass")
+    ap.add_argument("--events", default=None,
+                    help="JSON of [{start, end, label}] frame ranges to flag; "
+                         "n/b then step events instead of detections")
     ap.add_argument("--kpt-conf", type=float, default=0.5,
                     help="hide pose keypoints below this confidence (default: 0.5); "
                          "a pose model emits a whole skeleton even where it can "
@@ -214,6 +257,11 @@ def run(args):
     print(f"model {Path(args.model).name} on {dev}")
     print(f"classes {names} -> filter: {label}")
 
+    events = load_events(args.events, total) if args.events else []
+    if events:
+        print(f"events: {len(events)} from {args.events} "
+              f"({', '.join(sorted({e[2] for e in events}))})")
+
     per_frame = prescan(model, video, dev, args, ws.trackcache) if args.track else None
     if per_frame is not None:
         tracks = {}
@@ -225,6 +273,8 @@ def run(args):
         print("unique tracks: " + (", ".join(
             f"{names.get(k, k)}={len(v)}" for k, v in sorted(tracks.items())) or "0"))
     print("\n".join("  " + h for h in HELP))
+    if events:
+        print("  n/b step EVENTS, not detections, because --events was given")
 
     out = paths.resolve(args.out, ws.data / "to_annotate_video")
     (out / "images").mkdir(parents=True, exist_ok=True)
@@ -270,6 +320,14 @@ def run(args):
             dets[key] = out_
         return dets[key]
 
+    def scan_events(idx, step):
+        """Start of the next/previous event, wrapping. (index or None, message)."""
+        starts = [a for a, _b, _l in events]
+        later = [a for a in starts if a > idx] if step > 0 else [a for a in starts if a < idx]
+        if later:
+            return (min(later) if step > 0 else max(later)), ""
+        return (starts[0] if step > 0 else starts[-1]), "wrapped around"
+
     def scan(idx, step, conf):
         """Next/prev frame carrying a detection. Wraps past the end once, so a
         press at the tail of the video moves instead of silently repeating the
@@ -306,9 +364,11 @@ def run(args):
                     idx = max(0, min(idx, total - 1))
                     continue
                 boxes = detect(idx, conf)
+                active = next(((n, len(events), e) for n, e in enumerate(events)
+                               if e[0] <= idx <= e[1]), None)
                 cv2.imshow(win, draw(frame, boxes, idx, total, fps, conf, len(saved),
                                      overlay, show_help, video.stem, names, msg,
-                                     args.kpt_conf))
+                                     args.kpt_conf, active))
                 dirty = False
 
             # Poll rather than block: waitKey(0) sits in native code, so Ctrl-C
@@ -359,7 +419,9 @@ def run(args):
             elif k == ord("["):
                 idx = max(0, idx - args.stride * 10); dirty = True
             elif k in (ord("n"), ord("b")):
-                hit, msg = scan(idx, args.stride if k == ord("n") else -args.stride, conf)
+                fwd = k == ord("n")
+                hit, msg = (scan_events(idx, 1 if fwd else -1) if events
+                            else scan(idx, args.stride if fwd else -args.stride, conf))
                 if hit is not None:
                     idx = hit
                 else:

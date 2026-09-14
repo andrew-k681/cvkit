@@ -416,3 +416,20 @@ def test_draw_reads_a_prescan_tuple_and_hides_weak_keypoints():
 
     assert view[strong[1], strong[0]].any()
     assert not view[weak[1], weak[0]].any()
+
+
+@needs_images
+def test_event_ranges_are_clamped_and_reversed_ones_refused(tmp_path):
+    """An events file is generated, hand-edited, committed and shared, so it is
+    parsed rather than trusted: a range outside the video would otherwise seek
+    past its end, and a reversed one silently matches no frame."""
+    from cvkit.mining.review_video import load_events
+
+    p = tmp_path / "events.json"
+    p.write_text('[{"start": -5, "end": 99999, "label": "hand_up"}]')
+    assert load_events(p, 2090) == [(0, 2089, "hand_up")]
+
+    p.write_text('[{"start": 90, "end": 10}]')
+    with pytest.raises(SystemExit) as e:
+        load_events(p, 2090)
+    assert "after end" in str(e.value)
