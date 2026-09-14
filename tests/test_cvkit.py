@@ -3,6 +3,12 @@
 Deliberately free of torch, the Roboflow SDK and the network, so they run in a
 base install. The detector-driven paths are exercised by hand; what is tested
 here is the arithmetic that silently corrupts a dataset when it is wrong.
+
+Seven of them reach into `dataset.fix_export` and `mining.sheets`, which carry
+a module-level numpy/cv2 import by convention (AGENTS.md, convention 1), so
+importing the pure function still pulls those in. They skip on a base install
+rather than failing collection for everyone; CI installs the images extra, so
+nothing skips there.
 """
 import json
 import sys
@@ -12,11 +18,29 @@ import pytest
 
 from cvkit import detector, naming, train
 from cvkit.config import read_env_var, require, scrub
-from cvkit.dataset.fix_export import polygon_to_bbox
-from cvkit.mining.sheets import parse_reject, subsample
 from cvkit.roboflow import search
 from cvkit.video.download import build_command, read_urls
 from cvkit.video.frames import parse_offsets
+
+try:
+    from cvkit.dataset.fix_export import polygon_to_bbox
+    from cvkit.mining.sheets import parse_reject, subsample
+except ImportError:                     # no images extra: numpy/cv2 absent
+    polygon_to_bbox = parse_reject = subsample = None
+
+needs_images = pytest.mark.skipif(
+    polygon_to_bbox is None,
+    reason="needs the images extra: pip install 'cvkit[images]'")
+
+try:
+    import yaml as _yaml
+except ImportError:                     # PyYAML ships in the dev and detect extras
+    _yaml = None
+
+# Without it check_data_yaml exits on the missing import instead of on what it
+# is being tested for -- which two of these would have counted as a pass.
+needs_yaml = pytest.mark.skipif(
+    _yaml is None, reason="needs PyYAML: pip install -e '.[dev]'")
 
 
 # ------------------------------------------------------------------ naming
@@ -74,6 +98,7 @@ def test_offsets_reject_malformed():
 
 # --------------------------------------------------------------- rejection
 
+@needs_images
 def test_parse_reject():
     assert parse_reject("bg_002:5,17 bg_004:3") == {
         ("bg_002", 5), ("bg_002", 17), ("bg_004", 3)}
@@ -81,6 +106,7 @@ def test_parse_reject():
     assert parse_reject(None) == set()
 
 
+@needs_images
 def test_parse_reject_rejects_malformed():
     with pytest.raises(SystemExit):
         parse_reject("bg_002")
@@ -88,6 +114,7 @@ def test_parse_reject_rejects_malformed():
 
 # --------------------------------------------------------------- subsample
 
+@needs_images
 def test_subsample_spreads_across_videos():
     frames = ([naming.frame_name("a", i) for i in range(100)]
               + [naming.frame_name("b", i) for i in range(100)])
@@ -101,12 +128,14 @@ def test_subsample_spreads_across_videos():
     assert all(len(v) >= 8 for v in by_video.values())
 
 
+@needs_images
 def test_subsample_spreads_along_the_timeline():
     frames = [naming.frame_name("a", i) for i in range(100)]
     picked = sorted(naming.split(f)[1] for f in subsample(frames, 10))
     assert picked[0] < 10 and picked[-1] > 80, picked
 
 
+@needs_images
 def test_subsample_caps_at_what_exists():
     frames = [naming.frame_name("a", i) for i in range(3)]
     assert len(subsample(frames, 50)) == 3
@@ -114,11 +143,13 @@ def test_subsample_caps_at_what_exists():
 
 # ------------------------------------------------------------ polygon fix
 
+@needs_images
 def test_polygon_to_bbox():
     poly = "0 0.10 0.20 0.30 0.20 0.30 0.60 0.10 0.60".split()
     assert polygon_to_bbox(poly) == "0 0.200000 0.400000 0.200000 0.400000"
 
 
+@needs_images
 def test_polygon_to_bbox_keeps_the_class():
     poly = "7 0.0 0.0 1.0 1.0 0.5 0.5".split()
     assert polygon_to_bbox(poly).split()[0] == "7"
@@ -196,6 +227,7 @@ def test_build_command_keeps_cookies_before_the_separator(tmp_path):
 # anything else via exec() -- whenever the val images are missing. An export is
 # a file you got from somewhere, so cvkit refuses the key before training.
 
+@needs_yaml
 def test_data_yaml_with_a_download_key_is_refused(tmp_path):
     y = tmp_path / "data.yaml"
     y.write_text("train: images/train\nval: /nope\nnc: 1\nnames: [a]\n"
@@ -205,6 +237,7 @@ def test_data_yaml_with_a_download_key_is_refused(tmp_path):
     assert "download" in str(e.value)
 
 
+@needs_yaml
 def test_download_key_is_refused_in_flow_style(tmp_path):
     """Parsed, not pattern-matched: `{download: ...}` must not slip past."""
     y = tmp_path / "data.yaml"
@@ -213,6 +246,7 @@ def test_download_key_is_refused_in_flow_style(tmp_path):
         train.check_data_yaml(y)
 
 
+@needs_yaml
 def test_an_ordinary_export_yaml_passes(tmp_path):
     y = tmp_path / "data.yaml"
     y.write_text("train: ../train/images\nval: ../valid/images\n"
@@ -220,6 +254,7 @@ def test_an_ordinary_export_yaml_passes(tmp_path):
     assert train.check_data_yaml(y)["nc"] == 2
 
 
+@needs_yaml
 def test_unreadable_yaml_is_a_clean_exit_not_a_traceback(tmp_path):
     y = tmp_path / "data.yaml"
     y.write_text("names: [unclosed\n")
@@ -362,6 +397,7 @@ def test_require_names_the_distribution_not_the_module():
     assert "PyYAML" in str(e.value) and "cvkit[detect]" in str(e.value)
 
 
+@needs_yaml
 def test_a_directory_is_not_reported_as_corrupt_yaml(tmp_path):
     """Ultralytics accepts a directory here; cvkit does not, and should say
     which rather than imply the file is broken."""

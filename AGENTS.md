@@ -182,16 +182,26 @@ Two traps, both already fixed, both easy to reintroduce:
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/ -q        # 49 tests, ~0.2s
+python -m pytest tests/ -q        # 49 tests, ~0.2s (7 skip without [images])
 ```
 
 Tests cover the arithmetic that silently corrupts a dataset when wrong: frame
 naming round-trips, offset parsing, reject-spec parsing, subsampling spread,
-polygon→bbox conversion, and dotenv reading. They also cover the three guards
-in conventions 6 and 7 — the urls-file parser and the `--` separator, the
-`data.yaml` `download:` refusal, and the key scrubbing -- with a stub standing
-in for `requests`, so they still need no network. They deliberately require **no**
-torch, network, or GUI, so they run in a base install and in CI.
+polygon→bbox conversion, and dotenv reading. They also cover the guards in
+conventions 5, 6 and 7 — the urls-file parser and the `--` separator, the
+`data.yaml` `download:` refusal, the key scrubbing, and `safe_load_gap` — with
+stubs standing in for `requests` and `ultralytics`.
+
+They require **no** torch, network or GUI. They are not, however, free of
+*every* extra: seven reach into `dataset/fix_export.py` and `mining/sheets.py`
+for a pure function, and those modules carry a module-level numpy/cv2 import by
+convention 1, so importing the function pulls those in. Five more need PyYAML.
+All twelve `skipif` rather than fail, so a base install still runs the rest —
+this used to be an eager import that broke collection for everyone, and it went
+unnoticed because CI had never actually run. Do not "tidy" those imports back
+to the top of the file. Two of the PyYAML five assert only `raises(SystemExit)`,
+which a missing import would satisfy: without the skip they would pass for the
+wrong reason.
 
 Not covered by tests, and needing manual verification when touched:
 
@@ -200,8 +210,11 @@ Not covered by tests, and needing manual verification when touched:
 - Anything hitting the Roboflow API. Every such command has `--dry-run`; use it.
 - `mine` and `train` — need a real model. Point `--model` at a local checkpoint.
 
-CI (`.github/workflows/ci.yml`) runs the tests on 3.9 and 3.13 plus a `--help`
-smoke test of all 14 commands, with a base install only.
+CI (`.github/workflows/ci.yml`) runs on 3.9 and 3.13 in two phases, and the
+order matters: it installs `[dev]` and runs the `--help` smoke test of all 14
+commands *first*, so that check sees a genuine base install, then adds
+`[images]` and runs pytest, so nothing skips in CI. Still no torch and no
+Roboflow SDK.
 
 ## Known platform behaviour worth not rediscovering
 
