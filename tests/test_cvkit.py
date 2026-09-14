@@ -451,3 +451,23 @@ def test_weights_dir_is_pinned_absolute(monkeypatch, tmp_path):
 
     assert ul.utils.WEIGHTS_DIR.is_absolute()
     assert ul.utils.WEIGHTS_DIR == tmp_path / "w"
+
+
+@needs_images
+def test_short_detection_rows_are_refused_at_load(tmp_path):
+    """Rows are indexed positionally by draw(), scan() and the track tally, so a
+    short one from a hand-rolled backend must fail here, naming the frame, not
+    three call sites later as an opaque unpack error."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    p.write_text('{"names": {"0": "person"}, "frames": '
+                 '[[[1, 2, 3, 4, 0.9, 0, 7, [[5, 6, 0.8]]]], [[1, 2, 3, 4, 0.9, 0]]]}')
+    with pytest.raises(SystemExit) as e:
+        load_detections(p)
+    assert "frame 1" in str(e.value) and "6 fields" in str(e.value)
+
+    p.write_text('{"frames": [[[1, 2, 3, 4, 0.9, 0, null, []]]]}')
+    names, frames = load_detections(p)
+    assert names == {0: "object"}                      # default when unnamed
+    assert frames[0][0][6] is None and frames[0][0][7] == []

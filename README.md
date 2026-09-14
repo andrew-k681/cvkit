@@ -182,6 +182,27 @@ something else proposed, so you can judge it. Repointing `n`/`b` is the point:
 on busy footage "next frame with a detection" is just "next frame" -- 1786 of
 2090 frames on one measured clip.
 
+`--detections` goes further and reviews a pass another tool made, loading no
+model at all:
+
+```bash
+cvkit review-video clip.mp4 --detections mediapipe.json --events events.json
+```
+```json
+{"names": {"0": "person"},
+ "frames": [[[12, 34, 56, 78, 0.91, 0, 7, [[40, 50, 0.86]]]], []]}
+```
+
+One entry per frame, in order; `track_id` may be null and the keypoint list may
+be empty. It is the shape the tracking pass caches, so the two are
+interchangeable.
+
+This exists for licensing. The `detect` extra is Ultralytics and therefore
+**AGPL-3.0**; MediaPipe, RTMPose, ViTPose and RF-DETR are Apache-2.0, and a
+project avoiding AGPL cannot import Ultralytics even to look at its own
+results. With `--detections`, `review-video` runs in an install that has
+neither Ultralytics nor torch.
+
 ### 5. Keep the dataset honest
 
 ```bash
