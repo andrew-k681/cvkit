@@ -11,7 +11,13 @@ Two traps this exists to close:
    to absolute before the chdir; a bare name is left alone so the download
    still happens.
 
-3. A .pt is a pickle, and Ultralytics unpickles it unrestricted unless
+3. The chdir is not the whole story. Ultralytics also resolves downloads
+   against utils.WEIGHTS_DIR, which is Path(SETTINGS["weights_dir"]) and ships
+   *relative* ("weights"), so it lands wherever the process is standing when it
+   is finally used -- which is long after this chdir is restored. load()
+   rebinds it to an absolute path.
+
+4. A .pt is a pickle, and Ultralytics unpickles it unrestricted unless
    ULTRALYTICS_SAFE_LOAD is set -- which old versions ignore. load() sets it
    and safe_load_gap() checks it took.
 
@@ -65,13 +71,31 @@ def safe_load_gap():
     return None
 
 
+def pin_weights_dir(ultralytics, wdir):
+    """Point Ultralytics' WEIGHTS_DIR at an absolute path.
+
+    It is Path(SETTINGS["weights_dir"]) and ships relative ("weights"), so
+    every consumer resolves it against the cwd *at the moment it is used*.
+    Two of them run long after load()'s chdir is restored, and both import it
+    inside a function, so rebinding here reaches them:
+
+      * nn/text_model.py downloads CLIP for a world model on set_classes()
+        -- 353 MB, observed landing in a project root;
+      * utils/checks.py downloads yolo26n.pt for the AMP probe on train().
+
+    The chdir is still load()'s job: YOLO("yolo11s.pt") fetches a bare name
+    through the cwd without consulting WEIGHTS_DIR at all.
+    """
+    ultralytics.utils.WEIGHTS_DIR = Path(wdir)
+
+
 def load(model_name, weights_dir, device=None):
     """(YOLO model, device). See the module docstring for why this is fiddly."""
     candidate = Path(model_name)
     if candidate.exists():
         model_name = str(candidate.resolve())
 
-    wdir = Path(weights_dir)
+    wdir = Path(weights_dir).resolve()          # absolute: see pin_weights_dir
     wdir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("YOLO_CONFIG_DIR", str(wdir))
     # Must precede the ultralytics import below: the flag is read once, into a
@@ -83,7 +107,9 @@ def load(model_name, weights_dir, device=None):
     cwd = Path.cwd()
     os.chdir(wdir)
     try:
-        YOLO = config.require("ultralytics", "detect").YOLO
+        ul = config.require("ultralytics", "detect")
+        pin_weights_dir(ul, wdir)
+        YOLO = ul.YOLO
         gap = None if opted_out else safe_load_gap()
         if gap:
             raise SystemExit(

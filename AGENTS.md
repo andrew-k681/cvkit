@@ -112,6 +112,16 @@ and Ultralytics loads one with `weights_only=False` unless told otherwise —
 is read once into a module constant, so it must be set *before* ultralytics is
 imported; that is why the `config.require` call sits below it, not above.
 
+The `chdir` is not sufficient on its own. Ultralytics resolves some downloads
+against `utils.WEIGHTS_DIR` instead of the cwd, and it ships *relative*
+(`Path(SETTINGS["weights_dir"])`, `"weights"`). Both consumers that matter
+import it *inside a function*, so they read it after the `chdir` is restored
+and write into the user's project root: `nn/text_model.py` fetching CLIP on a
+world model's `set_classes()` (353 MB, observed), and `utils/checks.py`
+fetching `yolo26n.pt` for the AMP probe on `train()`. `pin_weights_dir` rebinds
+it absolute, which reaches both precisely because they import it late. Do not
+drop it for the `chdir`, or the reverse — they cover different download paths.
+
 **Setting the flag is not evidence it took**, hence `safe_load_gap()` and the
 refusal in `load()`. Both halves fail *quietly*: the flag does not exist before
 ultralytics 8.4.67 (bisected, not guessed) and its torch probe needs 2.6 —

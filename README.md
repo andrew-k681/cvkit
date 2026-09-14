@@ -227,6 +227,12 @@ into the *current working directory*. Everything that loads a model `chdir`s
 into `--weights-dir` (`data/mining/weights`, gitignored) first, resolving a
 relative `--model` to absolute so the `chdir` cannot break it.
 
+That covers only the downloads that read the cwd. Ultralytics resolves others
+against `utils.WEIGHTS_DIR`, which ships *relative* (`"weights"`) and is used
+long after the `chdir` is restored — CLIP on a world model's `set_classes()`
+(353 MB, measured landing in a project root) and the AMP probe on `train()`.
+cvkit rebinds it to an absolute path at load time.
+
 **Run what it reads.** A `urls.txt` line cannot become a yt-dlp option, a
 `data.yaml` carrying a `download:` key is refused rather than handed to
 Ultralytics to `exec()`, and a checkpoint is unpickled under Ultralytics'

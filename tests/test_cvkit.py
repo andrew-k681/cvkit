@@ -433,3 +433,21 @@ def test_event_ranges_are_clamped_and_reversed_ones_refused(tmp_path):
     with pytest.raises(SystemExit) as e:
         load_events(p, 2090)
     assert "after end" in str(e.value)
+
+
+def test_weights_dir_is_pinned_absolute(monkeypatch, tmp_path):
+    """Ultralytics ships weights_dir relative, so WEIGHTS_DIR resolves against
+    the cwd when it is finally used -- which for CLIP (world models) and the
+    AMP probe (training) is after load()'s chdir is restored. Observed: a
+    353 MB ViT-B-32.pt in a project root."""
+    import pathlib
+
+    _fake_ultralytics(monkeypatch)
+    ul = sys.modules["ultralytics"]
+    ul.utils = sys.modules["ultralytics.utils"]
+    ul.utils.WEIGHTS_DIR = pathlib.Path("weights")       # the shipped default
+
+    detector.pin_weights_dir(ul, tmp_path / "w")
+
+    assert ul.utils.WEIGHTS_DIR.is_absolute()
+    assert ul.utils.WEIGHTS_DIR == tmp_path / "w"
