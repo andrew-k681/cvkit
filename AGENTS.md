@@ -24,6 +24,7 @@ src/cvkit/
   paths.py        the Workspace class: default directory layout under a project root
   naming.py       frame filename construction and parsing
   detector.py     Ultralytics model loading, device pick, class resolution
+  bench.py        latency, throughput and memory on your own footage
   imageops.py     flatness() and descriptor() — shared by mining and fix_export
   train.py
   video/          download.py, frames.py
@@ -186,7 +187,7 @@ Two traps, both already fixed, both easy to reintroduce:
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/ -q        # 49 tests, ~0.2s (7 skip without [images])
+python -m pytest tests/ -q        # 58 tests, ~0.2s (15 skip without [images])
 ```
 
 Tests cover the arithmetic that silently corrupts a dataset when wrong: frame
@@ -197,12 +198,13 @@ conventions 5, 6 and 7 — the urls-file parser and the `--` separator, the
 stubs standing in for `requests` and `ultralytics`.
 
 They require **no** torch, network or GUI, but they are not free of *every*
-extra: seven import a pure function out of `fix_export.py` or `mining/sheets.py`,
-which carry a module-level numpy/cv2 import by convention 1, and five need
-PyYAML. All twelve `skipif` rather than fail — as an eager import this broke
-collection for everyone, unnoticed because CI had never run. Do not tidy those
-imports back to the top. Two of the PyYAML five assert only
-`raises(SystemExit)`, which a missing import satisfies: without the skip they
+extra: fifteen import a pure function out of `fix_export.py`, `mining/sheets.py`
+or `mining/review_video.py`, which carry a module-level numpy/cv2 import by
+convention 1, and five need PyYAML. All twenty `skipif` rather than fail — as
+an eager import this broke collection for everyone, unnoticed because CI had
+never run. Do not tidy those imports back to the top. Two of the PyYAML five
+assert only `raises(SystemExit)`, which a missing import satisfies: without the
+skip they
 would pass for the wrong reason.
 
 Not covered by tests, and needing manual verification when touched:

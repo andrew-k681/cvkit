@@ -427,6 +427,12 @@ def test_event_ranges_are_clamped_and_reversed_ones_refused(tmp_path):
     p.write_text('[{"start": -5, "end": 99999, "label": "hand_up"}]')
     assert load_events(p, 2090) == [(0, 2089, "hand_up")]
 
+    # both ends, or a range wholly outside survives inverted and matches nothing
+    p.write_text('[{"start": 5000, "end": 6000}]')
+    assert load_events(p, 2090) == [(2089, 2089, "event")]
+    p.write_text('[{"start": -50, "end": -10}]')
+    assert load_events(p, 2090) == [(0, 0, "event")]
+
     p.write_text('[{"start": 90, "end": 10}]')
     with pytest.raises(SystemExit) as e:
         load_events(p, 2090)
@@ -490,6 +496,19 @@ def test_detection_coordinates_are_clamped_into_the_frame(tmp_path):
     x1, y1, x2, y2 = frames[0][0][:4]
     assert (x1, y1, x2, y2) == (0, 0, 640, 5)
     assert frames[0][0][7][0][:2] == [0, 480]
+
+
+@needs_images
+def test_unusable_detection_values_are_refused(tmp_path):
+    """json.loads accepts NaN and Infinity; int() of either escapes the clamp."""
+    from cvkit.mining.review_video import load_detections
+
+    p = tmp_path / "d.json"
+    for bad in ('NaN', 'Infinity', '"x"'):
+        p.write_text('{"frames": [[[%s, 2, 3, 4, 0.9, 0, null, []]]]}' % bad)
+        with pytest.raises(SystemExit) as e:
+            load_detections(p, 640, 480)
+        assert "frame 0" in str(e.value)
 
 
 @needs_images

@@ -74,10 +74,13 @@ def load_events(path, total):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     out = []
     for e in data:
-        a, b = int(e["start"]), int(e["end"])
+        # clamp both ends before comparing, or a range wholly outside the video
+        # survives as an inverted one that matches no frame and seeks nowhere
+        a = max(0, min(int(e["start"]), total - 1))
+        b = max(0, min(int(e["end"]), total - 1))
         if a > b:
             raise SystemExit(f"event {e!r}: start is after end")
-        out.append((max(0, a), min(total - 1, b), str(e.get("label", "event"))))
+        out.append((a, b, str(e.get("label", "event"))))
     return sorted(out)
 
 
@@ -109,13 +112,28 @@ def load_detections(path, width, height):
                     f"{path}: frame {n} has a detection with {len(b)} fields, "
                     f"expected 8 (x1 y1 x2 y2 conf cls track_id keypoints)")
             x1, y1, x2, y2, conf, cls, tid, pts = b
-            row.append((clamp(x1, width), clamp(y1, height),
-                        clamp(x2, width), clamp(y2, height),
-                        float(conf), int(cls), tid,
-                        [[clamp(x, width), clamp(y, height), float(v)]
-                         for x, y, v in pts or []]))
+            try:    # json accepts NaN and Infinity, and any field may be a string
+                row.append((clamp(x1, width), clamp(y1, height),
+                            clamp(x2, width), clamp(y2, height),
+                            float(conf), int(cls),
+                            None if tid is None else int(tid),
+                            [[clamp(x, width), clamp(y, height), float(v)]
+                             for x, y, v in pts or []]))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise SystemExit(f"{path}: frame {n}: {type(exc).__name__}: {exc}")
         frames.append(row)
     return names, frames
+
+
+def keypoints_for(r, n):
+    """Per-detection [[x, y, v], ...]; v is 1.0 for a 2-D model, which has none."""
+    kp = getattr(r, "keypoints", None)
+    if kp is None or kp.xy is None:
+        return [[] for _ in range(n)]
+    xy = kp.xy.tolist()
+    cf = kp.conf.tolist() if kp.conf is not None else None
+    return [[[int(x), int(y), round(float(cf[i][j]), 3) if cf else 1.0]
+             for j, (x, y) in enumerate(xy[i])] for i in range(n)]
 
 
 def cache_file(cache_dir, video, model_path, imgsz, track_conf):
@@ -159,18 +177,13 @@ def prescan(model, video, dev, args, cache_dir):
         if r.boxes is not None and len(r.boxes):
             ids = (r.boxes.id.int().tolist() if r.boxes.id is not None
                    else [None] * len(r.boxes))
-            kp = getattr(r, "keypoints", None)          # None on a detect model
-            kxy = kp.xy.tolist() if kp is not None and kp.conf is not None else None
-            kconf = kp.conf.tolist() if kxy is not None else None
+            kpts = keypoints_for(r, len(r.boxes))
             # not `i`: that is the frame counter this loop sits inside
             for j, (b, c, k, t) in enumerate(zip(
                     r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
                     r.boxes.cls.int().tolist(), ids)):
-                pts = ([[int(x), int(y), round(float(pc), 3)]
-                        for (x, y), pc in zip(kxy[j], kconf[j])]
-                       if kxy is not None else [])
                 boxes.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]),
-                              round(float(c), 4), int(k), t, pts))
+                              round(float(c), 4), int(k), t, kpts[j]))
         per_frame.append(boxes)
         if i and i % 500 == 0:
             print(f"  {i} frames", flush=True)
@@ -360,10 +373,12 @@ def run(args):
                               device=dev, verbose=False)[0]
             out_ = []
             if r.boxes is not None:
-                for b, c, k in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
-                                   r.boxes.cls.int().tolist()):
+                kpts = keypoints_for(r, len(r.boxes))
+                for j, (b, c, k) in enumerate(zip(
+                        r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
+                        r.boxes.cls.int().tolist())):
                     out_.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]),
-                                 float(c), int(k), None, []))
+                                 float(c), int(k), None, kpts[j]))
             if len(dets) > 400:
                 dets.clear()
             dets[key] = out_

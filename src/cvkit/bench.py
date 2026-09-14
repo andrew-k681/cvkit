@@ -37,7 +37,7 @@ def device_memory_mb(torch, dev):
     d = str(dev)
     try:
         if d.startswith("mps"):
-            return torch.mps.current_allocated_memory() / (1024 * 1024)
+            return torch.mps.driver_allocated_memory() / (1024 * 1024)  # peak, as CUDA
         if d.startswith("cuda") or d.isdigit():
             return torch.cuda.max_memory_allocated() / (1024 * 1024)
     except Exception:
@@ -85,17 +85,18 @@ def run(args):
     print(f"timing {args.frames} frames after {args.warmup} warmup...", flush=True)
 
     decode, infer, stages = [], [], []
-    done = rewinds = 0
+    done = stalled = 0
     while done < args.warmup + args.frames:
         t0 = time.perf_counter()
         ok, frame = cap.read()
         t1 = time.perf_counter()
         if not ok:                       # short clip: loop rather than report fewer
-            rewinds += 1                 # or a file that stops decoding spins here
-            if rewinds > 2 and not decode:
+            stalled += 1                 # consecutive, or a dead seek spins here
+            if stalled > 2:
                 raise SystemExit(f"{video} stopped decoding after {done} frames")
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             continue
+        stalled = 0
         r = model.predict(frame, conf=args.conf, imgsz=args.imgsz, classes=keep,
                           device=dev, verbose=False)[0]
         t2 = time.perf_counter()

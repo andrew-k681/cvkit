@@ -35,7 +35,7 @@ use require, and a command whose extra is missing names the one to install.
 | `roboflow-api` | `requests` | `tag` | 5 packages |
 | `images` | `numpy`, `opencv-python` | `sheets`, `collect`, `verify`, `record`, `fix-export` | 2 packages |
 | `roboflow` | `roboflow`, `requests` | `upload-images`, `mark-null`, `upload-weights` | 33 packages |
-| `detect` | `ultralytics`, `torch`, `numpy`, `opencv-python`, `pyyaml` | `mine`, `train`, `review-video` | the big one |
+| `detect` | `ultralytics`, `torch`, `numpy`, `opencv-python`, `pyyaml` | `mine`, `train`, `review-video`, `bench` | the big one |
 | `all` | everything above | | |
 
 Combine them: `pip install "cvkit[images,roboflow]"`. `tag` has its own light
