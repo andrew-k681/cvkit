@@ -9,6 +9,15 @@ in a folder ready to upload.
     cvkit review-video data/raw/clip.mp4 \
         --model runs/v9/weights/best.pt --classes vehicle
 
+A pose checkpoint works the same way and additionally draws its keypoints:
+
+    cvkit review-video data/raw/clip.mp4 --model yolo11s-pose.pt --imgsz 1280
+
+Keypoints below --kpt-conf are hidden, because a pose model emits a full
+skeleton whether or not it can see one -- on footage where a table hides the
+torso, the shoulders are invented at 0.3 while the wrists are real at 0.9, and
+drawing both says the opposite of the truth.
+
 Keys (also printed, and shown in-window with h):
     SPACE  save this frame      u  undo last save
     q or ESC quits; so does closing the window, or Ctrl-C in the terminal
@@ -48,7 +57,8 @@ HELP = [
 
 def cache_file(cache_dir, video, model_path, imgsz, track_conf):
     """One cache per (video, model, imgsz, floor), invalidated by mtime."""
-    key = f"{video.resolve()}|{Path(model_path).resolve()}|{imgsz}|{track_conf}"
+    # v2: cached detections carry keypoints; a v1 cache has a shorter tuple
+    key = f"v2|{video.resolve()}|{Path(model_path).resolve()}|{imgsz}|{track_conf}"
     stamp = f"{video.stat().st_mtime_ns}|{Path(model_path).stat().st_mtime_ns}"
     h = hashlib.sha1((key + "|" + stamp).encode()).hexdigest()[:16]
     return Path(cache_dir) / f"{video.stem}.{h}.json"
@@ -86,10 +96,18 @@ def prescan(model, video, dev, args, cache_dir):
         if r.boxes is not None and len(r.boxes):
             ids = (r.boxes.id.int().tolist() if r.boxes.id is not None
                    else [None] * len(r.boxes))
-            for b, c, k, t in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
-                                  r.boxes.cls.int().tolist(), ids):
+            kp = getattr(r, "keypoints", None)          # None on a detect model
+            kxy = kp.xy.tolist() if kp is not None and kp.conf is not None else None
+            kconf = kp.conf.tolist() if kxy is not None else None
+            # not `i`: that is the frame counter this loop sits inside
+            for j, (b, c, k, t) in enumerate(zip(
+                    r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
+                    r.boxes.cls.int().tolist(), ids)):
+                pts = ([[int(x), int(y), round(float(pc), 3)]
+                        for (x, y), pc in zip(kxy[j], kconf[j])]
+                       if kxy is not None else [])
                 boxes.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]),
-                              round(float(c), 4), int(k), t))
+                              round(float(c), 4), int(k), t, pts))
         per_frame.append(boxes)
         if i and i % 500 == 0:
             print(f"  {i} frames", flush=True)
@@ -105,12 +123,18 @@ def prescan(model, video, dev, args, cache_dir):
 
 
 def draw(frame, boxes, idx, total, fps, conf, saved, overlay, show_help,
-         name, names, msg):
+         name, names, msg, kpt_conf=0.5):
     view = frame.copy()
     if overlay:
-        for x1, y1, x2, y2, c, k, tid in boxes:
+        for x1, y1, x2, y2, c, k, tid, pts in boxes:
             col = PALETTE[k % len(PALETTE)]
             cv2.rectangle(view, (x1, y1), (x2, y2), col, 2)
+            for px, py, pc in pts:
+                if pc >= kpt_conf:
+                    # white ring first: a bare dot in the box colour vanishes
+                    # against footage that happens to be that colour
+                    cv2.circle(view, (px, py), 5, (255, 255, 255), -1)
+                    cv2.circle(view, (px, py), 3, col, -1)
             # class id first, as in the YOLO label files you will be writing
             tag = f"{k}:{names.get(k, k)} {c:.2f}"
             if tid is not None:
@@ -160,6 +184,10 @@ def add_args(ap):
                     help="floor for the tracking pass; --conf then filters the "
                          "cached result, so =/- needs no re-run")
     ap.add_argument("--rescan", action="store_true", help="ignore the cached pass")
+    ap.add_argument("--kpt-conf", type=float, default=0.5,
+                    help="hide pose keypoints below this confidence (default: 0.5); "
+                         "a pose model emits a whole skeleton even where it can "
+                         "only see a hand")
     ap.add_argument("--classes", "--class", dest="classes", default=None,
                     help="restrict detection to these classes: names or ids, "
                          "comma separated (default: every class the model has)")
@@ -190,7 +218,8 @@ def run(args):
     if per_frame is not None:
         tracks = {}
         for fr in per_frame:
-            for *_, k, tid in fr:
+            for b in fr:
+                k, tid = b[5], b[6]
                 if tid is not None and (keep is None or k in keep):
                     tracks.setdefault(k, set()).add(tid)
         print("unique tracks: " + (", ".join(
@@ -235,7 +264,7 @@ def run(args):
                 for b, c, k in zip(r.boxes.xyxy.tolist(), r.boxes.conf.tolist(),
                                    r.boxes.cls.int().tolist()):
                     out_.append((int(b[0]), int(b[1]), int(b[2]), int(b[3]),
-                                 float(c), int(k), None))
+                                 float(c), int(k), None, []))
             if len(dets) > 400:
                 dets.clear()
             dets[key] = out_
@@ -278,7 +307,8 @@ def run(args):
                     continue
                 boxes = detect(idx, conf)
                 cv2.imshow(win, draw(frame, boxes, idx, total, fps, conf, len(saved),
-                                     overlay, show_help, video.stem, names, msg))
+                                     overlay, show_help, video.stem, names, msg,
+                                     args.kpt_conf))
                 dirty = False
 
             # Poll rather than block: waitKey(0) sits in native code, so Ctrl-C

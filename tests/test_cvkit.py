@@ -396,3 +396,23 @@ def test_a_directory_is_not_reported_as_corrupt_yaml(tmp_path):
     with pytest.raises(SystemExit) as e:
         train.check_data_yaml(d)
     assert "directory" in str(e.value)
+
+
+# ------------------------------------------------------- review-video overlay
+
+@needs_images
+def test_draw_reads_a_prescan_tuple_and_hides_weak_keypoints():
+    """Pins the cached tuple's shape, which three call sites index positionally,
+    and the threshold: a pose model invents the keypoints it cannot see, so
+    drawing every one of them misreports what the model actually found."""
+    import numpy as np
+
+    from cvkit.mining.review_video import draw
+
+    strong, weak = (30, 40, 0.9), (90, 40, 0.1)
+    box = (10, 10, 110, 70, 0.8, 0, 7, [list(strong), list(weak)])
+    view = draw(np.zeros((80, 120, 3), dtype=np.uint8), [box], 0, 1, 25.0,
+                0.25, 0, True, False, "clip", {0: "person"}, "", kpt_conf=0.5)
+
+    assert view[strong[1], strong[0]].any()
+    assert not view[weak[1], weak[0]].any()

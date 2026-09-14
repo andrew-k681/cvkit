@@ -154,6 +154,17 @@ n / b  next / previous frame with a detection (wraps)
 = / -  confidence      o  overlay               h  help
 ```
 
+A pose checkpoint works here too, and draws its keypoints:
+
+```bash
+cvkit review-video data/raw/clip.mp4 --model yolo11s-pose.pt --imgsz 1280
+```
+
+Keypoints below `--kpt-conf` (default 0.5) are hidden, because a pose model
+emits a whole skeleton whether or not it can see one. Where a table hides the
+torso it invents the shoulders at 0.3 while the wrists are real at 0.9, and
+drawing both says the opposite of what the model actually found.
+
 ### 5. Keep the dataset honest
 
 ```bash
