@@ -216,6 +216,13 @@ commands *first*, so that check sees a genuine base install, then adds
 `[images]` and runs pytest, so nothing skips in CI. Still no torch and no
 Roboflow SDK.
 
+The smoke test does not require `--help` to succeed. On a base install the six
+commands gated on an extra cannot import their module at all, so they exit 1 by
+design, naming the extra — that is `cli.py`'s ImportError handler doing its job.
+It passes a command that prints help *or* names an extra, and fails anything
+else, which is what actually checks that every `COMMANDS` entry carries its
+fifth field. A plain `|| exit 1` cannot work here, and was the bug.
+
 ## Known platform behaviour worth not rediscovering
 
 - **Roboflow search pagination is unstable.** Ordering shifts between calls, so

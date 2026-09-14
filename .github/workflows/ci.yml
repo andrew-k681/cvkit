@@ -29,12 +29,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: CLI smoke test
+        # On a base install the commands gated on an extra cannot import their
+        # module at all, so `--help` exits 1 *by design*, naming the extra
+        # (cli.py's ImportError handler). Either outcome is a pass; a traceback
+        # or a message that names no extra is not. That is what checks every
+        # COMMANDS entry carries its fifth field -- convention 1 in AGENTS.md.
         run: |
           cvkit --version
           for c in download frames mine sheets collect verify record \
                    review-video fix-export train upload-images mark-null \
                    tag upload-weights; do
-            cvkit "$c" --help > /dev/null || exit 1
+            out=$(cvkit "$c" --help 2>&1) && continue
+            case "$out" in
+              *"pip install 'cvkit["*) echo "  $c: gated, names its extra" ;;
+              *) echo "FAIL: cvkit $c --help"; echo "$out"; exit 1 ;;
+            esac
           done
       - name: Add the images extra
         # A handful of tests reach into fix_export and mining.sheets, which
